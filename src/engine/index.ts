@@ -6,3 +6,18 @@ export function getEngine(): FloorwalkerEngine {
 }
 
 export type { EngineSnapshot, FloorwalkerEngine, PathPoint, Pin } from '@/engine/types';
+
+export {
+  DEFAULT_STEP_DETECTOR_CONFIG,
+  STANDARD_GRAVITY_MPS2,
+  accelerationMagnitude,
+  countSteps,
+  detectSteps,
+} from '@/engine/step-detector';
+export type {
+  AccelMagnitudeSample,
+  AccelSample,
+  StepDetectorConfig,
+  StepEvent,
+  StepSample,
+} from '@/engine/step-detector';
