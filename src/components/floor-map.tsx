@@ -1,6 +1,14 @@
 import { Canvas, Circle, Path } from '@shopify/react-native-skia';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import {
+  type ComponentRef,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import {
   GestureDetector,
   useExclusiveGestures,
@@ -17,11 +25,15 @@ import type { EngineSnapshot } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
 import {
   PIN_HIT_RADIUS,
+  boundsEqual,
+  boundsOf,
   canvasToStage,
   clampTranslation,
+  fitBoundsFor,
   framePoints,
   hitTestPin,
-  makeProjector,
+  keptFitBounds,
+  makeProjectorFromBounds,
   panBaseline,
   panTo,
   pathForMode,
@@ -29,8 +41,13 @@ import {
   pinchAboutFocal,
   pinchBaseline,
   stageToCanvas,
+  wheelZoomFactor,
+  zoomAt,
+  zoomFocal,
+  type Bounds,
   type MapPathMode,
   type PlacedPin,
+  type XY,
 } from '@/map/geometry';
 
 const PIN_RADIUS = 6;
@@ -44,10 +61,16 @@ export default function FloorMap({ snapshot, mode }: Props) {
   const theme = useTheme();
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [fitted, setFitted] = useState<Bounds | null>(null);
+  const adjusted = useRef(false);
+  const contentRef = useRef<{ bounds: Bounds; points: XY[] } | null>(null);
+  const stageRef = useRef<ComponentRef<typeof View>>(null);
+  const wheelCleanup = useRef<(() => void) | null>(null);
 
+  const worldBounds = fitBoundsFor(framePoints(snapshot));
   const place = useMemo(
-    () => makeProjector(framePoints(snapshot), size.width, size.height),
-    [size.height, size.width, snapshot],
+    () => (fitted ? makeProjectorFromBounds(fitted, size.width, size.height) : null),
+    [fitted, size.height, size.width],
   );
   const placedPath = useMemo(() => {
     if (!place) return [];
@@ -85,9 +108,37 @@ export default function FloorMap({ snapshot, mode }: Props) {
   const labelY = useSharedValue(0);
   const labelOn = useSharedValue(0);
 
+  const markAdjusted = useCallback(() => {
+    adjusted.current = true;
+  }, []);
+
   useLayoutEffect(() => {
     pinsRef.current = placedPins;
   }, [placedPins]);
+
+  useLayoutEffect(() => {
+    const next = keptFitBounds(adjusted.current, fitted, worldBounds);
+    if (fitted && boundsEqual(fitted, next)) return;
+    setFitted(next);
+  }, [fitted, worldBounds]);
+
+  const fitToContent = () => {
+    adjusted.current = false;
+    setFitted(worldBounds);
+    scale.value = 1;
+    translateX.value = 0;
+    translateY.value = 0;
+  };
+
+  useLayoutEffect(() => {
+    if (!place) return;
+    const points = framePoints(snapshot)
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      .map(place);
+    const bounds = boundsOf(points);
+    if (!bounds) return;
+    contentRef.current = { bounds, points };
+  }, [place, snapshot]);
 
   useLayoutEffect(() => {
     labelX.value = selectedX;
@@ -107,6 +158,7 @@ export default function FloorMap({ snapshot, mode }: Props) {
   const pinch = usePinchGesture({
     onBegin: () => {
       pinchArmed.value = 0;
+      runOnJS(markAdjusted)();
     },
     onUpdate: (event) => {
       if (pinchArmed.value === 0) {
@@ -133,6 +185,7 @@ export default function FloorMap({ snapshot, mode }: Props) {
         scale.value,
         widthSv.value,
         heightSv.value,
+        48,
       );
       translateX.value = next.x;
       translateY.value = next.y;
@@ -152,6 +205,7 @@ export default function FloorMap({ snapshot, mode }: Props) {
           { x: event.translationX, y: event.translationY },
         );
         panArmed.value = 1;
+        runOnJS(markAdjusted)();
       }
       const next = panTo(panStart.value, { x: event.translationX, y: event.translationY });
       translateX.value = next.x;
@@ -164,6 +218,7 @@ export default function FloorMap({ snapshot, mode }: Props) {
         scale.value,
         widthSv.value,
         heightSv.value,
+        48,
       );
       translateX.value = next.x;
       translateY.value = next.y;
@@ -181,12 +236,74 @@ export default function FloorMap({ snapshot, mode }: Props) {
   const gesture = useSimultaneousGestures(pinch, dragOrTap);
 
   const mapStyle = useAnimatedStyle(() => ({
+    transformOrigin: 'left top',
     transform: [
       { translateX: translateX.value },
       { translateY: translateY.value },
       { scale: scale.value },
     ],
   }));
+
+  const attachWheel = () => {
+    if (wheelCleanup.current) return;
+    type WheelLike = {
+      deltaY: number;
+      deltaMode: number;
+      clientX: number;
+      clientY: number;
+      preventDefault(): void;
+    };
+    const node = stageRef.current as unknown as {
+      addEventListener?: (
+        type: string,
+        listener: (event: WheelLike) => void,
+        options?: { passive?: boolean; capture?: boolean },
+      ) => void;
+      removeEventListener?: (
+        type: string,
+        listener: (event: WheelLike) => void,
+        options?: { capture?: boolean },
+      ) => void;
+      getBoundingClientRect?: () => { left: number; top: number };
+    } | null;
+    if (!node?.addEventListener || !node.removeEventListener || !node.getBoundingClientRect) return;
+    const bounds = node.getBoundingClientRect.bind(node);
+
+    const onWheel = (event: WheelLike) => {
+      event.preventDefault();
+      const rect = bounds();
+      adjusted.current = true;
+      const fitted = contentRef.current;
+      const current = {
+        scale: scale.value,
+        translateX: translateX.value,
+        translateY: translateY.value,
+      };
+      const focal = zoomFocal(
+        { x: event.clientX - rect.left, y: event.clientY - rect.top },
+        current,
+        fitted?.points,
+      );
+      const next = zoomAt(current, focal, wheelZoomFactor(event.deltaY, event.deltaMode));
+      const clamped = clampTranslation(
+        { x: next.translateX, y: next.translateY },
+        next.scale,
+        widthSv.value,
+        heightSv.value,
+        48,
+      );
+      scale.value = next.scale;
+      translateX.value = clamped.x;
+      translateY.value = clamped.y;
+    };
+
+    node.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    wheelCleanup.current = () => node.removeEventListener?.('wheel', onWheel, { capture: true });
+  };
+
+  useEffect(() => {
+    return () => wheelCleanup.current?.();
+  }, []);
 
   const calloutStyle = useAnimatedStyle(() => {
     const point = canvasToStage(
@@ -212,20 +329,33 @@ export default function FloorMap({ snapshot, mode }: Props) {
 
   return (
     <View style={styles.fill}>
-      <ThemedText
-        type="small"
-        themeColor={selected ? 'text' : 'textSecondary'}
-        testID="map-pin-label"
-      >
-        {selected ? selected.label : placedPins.length > 0 ? 'tap a pin' : 'no pins'}
-      </ThemedText>
+      <View style={styles.bar}>
+        <ThemedText
+          type="small"
+          themeColor={selected ? 'text' : 'textSecondary'}
+          testID="map-pin-label"
+        >
+          {selected ? selected.label : placedPins.length > 0 ? 'tap a pin' : 'no pins'}
+        </ThemedText>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Fit path"
+          testID="map-fit"
+          onPress={fitToContent}
+          style={[styles.fit, { backgroundColor: theme.backgroundElement }]}
+        >
+          <ThemedText type="small">fit</ThemedText>
+        </Pressable>
+      </View>
       <View
+        ref={stageRef}
         testID="map-stage"
         style={[styles.stage, { backgroundColor: theme.backgroundElement }]}
         onLayout={(event) => {
           const { width, height } = event.nativeEvent.layout;
           widthSv.value = width;
           heightSv.value = height;
+          attachWheel();
           setSize((current) =>
             current.width === width && current.height === height ? current : { width, height },
           );
@@ -282,6 +412,16 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     gap: Spacing.two,
+  },
+  bar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  fit: {
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
   },
   stage: {
     flex: 1,

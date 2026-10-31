@@ -3,7 +3,7 @@
  *
  * Fitted points are pixels in the stage, north up, before the user zooms.
  * The camera is `stage = fitted * scale + translate`, with the origin at the
- * stage's top left. Pinch, drawing, and pin hits share that formula.
+ * stage's top left. Pinch, wheel zoom, drawing, and pin hits share that formula.
  */
 
 import type { EngineSnapshot, PathPoint, Pin } from '@/engine';
@@ -53,9 +53,28 @@ export function boundsOf(points: readonly XY[]): Bounds | null {
   return { minX, maxX, minY, maxY };
 }
 
-export function makeProjector(frame: readonly XY[], width: number, height: number, pad = MAP_PAD) {
-  const bounds = boundsOf(frame);
-  if (!bounds || width <= pad * 2 || height <= pad * 2) return null;
+export const EMPTY_FIT_BOUNDS: Bounds = { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5 };
+
+export function fitBoundsFor(points: readonly XY[]): Bounds {
+  return boundsOf(points) ?? EMPTY_FIT_BOUNDS;
+}
+
+export function boundsEqual(a: Bounds, b: Bounds): boolean {
+  return a.minX === b.minX && a.maxX === b.maxX && a.minY === b.minY && a.maxY === b.maxY;
+}
+
+export function keptFitBounds(adjusted: boolean, fitted: Bounds | null, next: Bounds): Bounds {
+  if (adjusted && fitted) return fitted;
+  return next;
+}
+
+export function makeProjectorFromBounds(
+  bounds: Bounds,
+  width: number,
+  height: number,
+  pad = MAP_PAD,
+) {
+  if (width <= pad * 2 || height <= pad * 2) return null;
 
   const spanX = Math.max(bounds.maxX - bounds.minX, 1);
   const spanY = Math.max(bounds.maxY - bounds.minY, 1);
@@ -67,6 +86,12 @@ export function makeProjector(frame: readonly XY[], width: number, height: numbe
     x: offsetX + (point.x - bounds.minX) * scale,
     y: offsetY + (bounds.maxY - point.y) * scale,
   });
+}
+
+export function makeProjector(frame: readonly XY[], width: number, height: number, pad = MAP_PAD) {
+  const bounds = boundsOf(frame);
+  if (!bounds) return null;
+  return makeProjectorFromBounds(bounds, width, height, pad);
 }
 
 export function pathToSvg(points: readonly XY[]): string {
@@ -166,23 +191,85 @@ export function panTo(baseline: XY, translation: XY): XY {
   };
 }
 
+function clampAxis(value: number, min: number, max: number): number {
+  'worklet';
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  return Math.min(hi, Math.max(lo, value));
+}
+
+function clampCenter(
+  translate: number,
+  scale: number,
+  size: number,
+  min: number,
+  max: number,
+  margin: number,
+): number {
+  'worklet';
+  const center = (min + max) / 2;
+  const inset = Math.max(margin, size * 0.2);
+  return clampAxis(translate, inset - center * scale, size - inset - center * scale);
+}
+
 export function clampTranslation(
   translate: XY,
   scale: number,
   width: number,
   height: number,
   margin = 48,
+  content?: Bounds,
 ): XY {
   'worklet';
   if (!(width > 0) || !(height > 0) || !(scale > 0)) return { x: translate.x, y: translate.y };
-  const minX = margin - width * scale;
-  const maxX = width - margin;
-  const minY = margin - height * scale;
-  const maxY = height - margin;
+  if (!content) {
+    return {
+      x: clampAxis(translate.x, margin - width * scale, width - margin),
+      y: clampAxis(translate.y, margin - height * scale, height - margin),
+    };
+  }
   return {
-    x: Math.min(Math.max(minX, maxX), Math.max(Math.min(minX, maxX), translate.x)),
-    y: Math.min(Math.max(minY, maxY), Math.max(Math.min(minY, maxY), translate.y)),
+    x: clampCenter(translate.x, scale, width, content.minX, content.maxX, margin),
+    y: clampCenter(translate.y, scale, height, content.minY, content.maxY, margin),
   };
+}
+
+export function wheelZoomFactor(deltaY: number, deltaMode = 0): number {
+  if (!Number.isFinite(deltaY) || deltaY === 0) return 1;
+  const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 800 : deltaY;
+  if (!Number.isFinite(pixels)) return 1;
+  return Math.exp(-pixels * 0.0015);
+}
+
+/**
+ * Wheel and pinch focals in the padding zoom the nearest path point.
+ * The bounding-box center of an L is empty, so zooming it hides the stroke.
+ */
+export function zoomFocal(focal: XY, camera: MapTransform, points?: readonly XY[]): XY {
+  'worklet';
+  if (!points || points.length === 0 || !(camera.scale > 0)) return focal;
+  let best = points[0];
+  let bestDist = Infinity;
+  for (const point of points) {
+    const sx = point.x * camera.scale + camera.translateX;
+    const sy = point.y * camera.scale + camera.translateY;
+    const dist = (sx - focal.x) * (sx - focal.x) + (sy - focal.y) * (sy - focal.y);
+    if (dist < bestDist) {
+      best = point;
+      bestDist = dist;
+    }
+  }
+  if (bestDist <= 48 * 48) return focal;
+  return {
+    x: best.x * camera.scale + camera.translateX,
+    y: best.y * camera.scale + camera.translateY,
+  };
+}
+
+export function zoomAt(current: MapTransform, focal: XY, factor: number): MapTransform {
+  'worklet';
+  const baseline = pinchBaseline(current, focal, 1);
+  return pinchAboutFocal(baseline, focal, factor);
 }
 
 export function hitTestPin<T extends XY>(pins: readonly T[], point: XY, radius: number): T | null {

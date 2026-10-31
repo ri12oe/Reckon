@@ -66,7 +66,7 @@ export default function MapScreen() {
       </View>
       <ThemedText type="small" themeColor="textSecondary">
         {snapshot.stepCount} steps · {snapshot.correctedPath.length} points · {snapshot.pins.length}{' '}
-        pins · pinch to zoom, drag to pan
+        pins · pinch or scroll to zoom, drag to pan
       </ThemedText>
       <SkiaMap snapshot={snapshot} mode={mode} />
     </Screen>
