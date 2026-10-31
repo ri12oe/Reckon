@@ -18,7 +18,8 @@
  * future is not used. Until the first sample, the heading is 0° (north).
  *
  * `stepLength` is meters per step and is constant for the call. This
- * module does not estimate it from the walker.
+ * module does not estimate it. `estimateStepLength` does, from a
+ * known-distance calibration walk.
  *
  * Not in this module: step-length calibration, corridor snap, loop
  * closure, landmarks, or any other drift correction.
