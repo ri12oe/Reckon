@@ -13,6 +13,7 @@ import {
   type CalibrationSession,
 } from '@/calibration/session';
 import { Button } from '@/components/button';
+import { Glass } from '@/components/glass';
 import { Icon } from '@/components/icon';
 import { Screen } from '@/components/screen';
 import { StepRing } from '@/components/step-ring';
@@ -219,13 +220,13 @@ export default function CalibrationScreen() {
 
         {session.phase === 'walking' ? (
           <>
-            <View style={styles.message}>
+            <Glass style={styles.message}>
               <ThemedText type="title2">Keep walking straight</ThemedText>
               <ThemedText themeColor="textSecondary" style={styles.center}>
                 {remaining} more {remaining === 1 ? 'step' : 'steps'}
                 {courseMeters !== null ? ` down the ${courseMeters} m hallway` : ''}
               </ThemedText>
-            </View>
+            </Glass>
             <View style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
               <ThemedText type="footnote" themeColor="textSecondary">
                 Walk at your normal pace with the phone held in front of you. Reckon stops at{' '}
@@ -317,8 +318,13 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
   },
   message: {
+    alignSelf: 'center',
     alignItems: 'center',
-    gap: Spacing.one,
+    maxWidth: '100%',
+    gap: Spacing.one + Spacing.half,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: Radius.large,
   },
   center: {
     textAlign: 'center',

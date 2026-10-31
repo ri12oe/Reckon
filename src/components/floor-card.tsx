@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, IconButton } from '@/components/button';
+import { Glass } from '@/components/glass';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing, withAlpha } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -68,7 +69,7 @@ export function FloorCard({
 }: Props) {
   const theme = useTheme();
   return (
-    <View style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
+    <Glass style={styles.card}>
       <View style={styles.row}>
         <Pressable
           accessibilityRole="button"
@@ -128,7 +129,7 @@ export function FloorCard({
           />
         </View>
       ) : null}
-    </View>
+    </Glass>
   );
 }
 
