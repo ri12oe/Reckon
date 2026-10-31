@@ -25,6 +25,10 @@
  * Corridor snap is on unless `drift.corridor` says otherwise. Loop closure
  * and landmark tags are off until the caller asks. Landmark tags also
  * become pins, sitting on the corrected path at the earlier tag.
+ *
+ * `recallSnapshot` shows a saved walk from `getSnapshot` until `clearRecall`
+ * or `reset`. It does not run the pipeline. Samples still accumulate and
+ * show up again once the saved walk is cleared.
  */
 
 import {
@@ -109,6 +113,10 @@ export type LiveFloorwalkerEngine = FloorwalkerEngine & {
   /** Absolute pin. It does not follow the path and it is not a drift anchor. */
   addPin(pin: Pin): void;
   tagLandmark(tag: LandmarkPin): void;
+  /** Show a saved walk. Does not recompute the path. */
+  recallSnapshot(snapshot: EngineSnapshot): void;
+  clearRecall(): void;
+  isRecalled(): boolean;
   reset(): void;
   getStepLength(): number;
   startSensors(options?: StartSensorFeedOptions): Promise<void>;
@@ -145,6 +153,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   let stepLengthM = initialLength;
   let drift = cloneDrift(initialDrift);
   let cached: EngineSnapshot | null = null;
+  let recalled: EngineSnapshot | null = null;
   let accepted = false;
   let feed: SensorFeed | null = null;
   let starting: Promise<void> | null = null;
@@ -284,6 +293,17 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       }
       touch();
     },
+    recallSnapshot(snapshot) {
+      recalled = cloneSnapshot(snapshot);
+      touch();
+    },
+    clearRecall() {
+      recalled = null;
+      touch();
+    },
+    isRecalled() {
+      return recalled !== null;
+    },
     reset() {
       accels.length = 0;
       gyros.length = 0;
@@ -293,12 +313,14 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       stepLengthM = initialLength;
       drift = cloneDrift(initialDrift);
       accepted = false;
+      recalled = null;
       touch();
     },
     getStepLength() {
       return stepLengthM;
     },
     getSnapshot() {
+      if (recalled) return cloneSnapshot(recalled);
       if (!accepted && emptySnapshot) return cloneSnapshot(emptySnapshot);
       cached ??= compute();
       return cloneSnapshot(cached);

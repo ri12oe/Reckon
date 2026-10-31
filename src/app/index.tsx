@@ -6,6 +6,7 @@ import { Screen } from '@/components/screen';
 import SkiaWalk from '@/components/skia-walk';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { getActiveFloor, resumeLiveWalk, type ActiveFloor } from '@/db/session';
 import { getEngine, type EngineSnapshot } from '@/engine';
 import { lightHaptic } from '@/haptics';
 import { useTheme } from '@/hooks/use-theme';
@@ -16,6 +17,7 @@ const POLL_MS = 50;
 export default function WalkScreen() {
   const theme = useTheme();
   const [snapshot, setSnapshot] = useState<EngineSnapshot>(() => getEngine().getSnapshot());
+  const [active, setActive] = useState<ActiveFloor | null>(() => getActiveFloor());
   const stepsRef = useRef(snapshot.stepCount);
   const droppedRef = useRef(0);
 
@@ -28,6 +30,7 @@ export default function WalkScreen() {
         const next = engine.getSnapshot();
         if (next.stepCount > stepsRef.current) lightHaptic();
         stepsRef.current = next.stepCount;
+        setActive(getActiveFloor());
         setSnapshot(next);
       };
 
@@ -57,6 +60,12 @@ export default function WalkScreen() {
 
   const heading = Number.isFinite(snapshot.heading) ? snapshot.heading : 0;
 
+  const resume = () => {
+    resumeLiveWalk();
+    setActive(null);
+    setSnapshot(getEngine().getSnapshot());
+  };
+
   return (
     <Screen title="Walk">
       <View style={styles.readout}>
@@ -71,14 +80,30 @@ export default function WalkScreen() {
       <ThemedText type="small" themeColor="textSecondary">
         thin line is raw, thick line is corrected
       </ThemedText>
+      {active ? (
+        <ThemedText type="small">
+          saved floor {active.buildingName} / {active.name}
+        </ThemedText>
+      ) : null}
       <SkiaWalk snapshot={snapshot} />
-      <Pressable
-        accessibilityRole="button"
-        onPress={dropPin}
-        style={[styles.pinButton, { backgroundColor: theme.backgroundElement }]}
-      >
-        <ThemedText>drop pin</ThemedText>
-      </Pressable>
+      {active ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Resume live walk"
+          onPress={resume}
+          style={[styles.pinButton, { backgroundColor: theme.backgroundElement }]}
+        >
+          <ThemedText>resume live walk</ThemedText>
+        </Pressable>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          onPress={dropPin}
+          style={[styles.pinButton, { backgroundColor: theme.backgroundElement }]}
+        >
+          <ThemedText>drop pin</ThemedText>
+        </Pressable>
+      )}
     </Screen>
   );
 }

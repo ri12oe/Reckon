@@ -3,7 +3,7 @@ import { fuseHeading, type GyroSample, type MagSample } from '@/engine/heading-f
 import { createLiveEngine } from '@/engine/live-engine';
 import { integratePath } from '@/engine/path-integration';
 import { STANDARD_GRAVITY_MPS2, type AccelSample } from '@/engine/step-detector';
-import type { PathPoint } from '@/engine/types';
+import type { EngineSnapshot, PathPoint } from '@/engine/types';
 
 const DT_MS = 20;
 const RAD = Math.PI / 180;
@@ -531,6 +531,48 @@ describe('drift correction on the live path', () => {
     expect(opened.correctedPath[4]!.x).toBeCloseTo(4, 9);
     expect(opened.correctedPath[4]!.y).toBeCloseTo(0, 9);
     expect(opened.rawPath[4]!.x).toBe(4);
+  });
+
+  test('recallSnapshot shows a saved walk until clearRecall or reset', () => {
+    const demo: EngineSnapshot = {
+      rawPath: [{ x: 1, y: 1, t: 1 }],
+      correctedPath: [{ x: 1, y: 1, t: 1 }],
+      stepCount: 9,
+      heading: 10,
+      pins: [],
+    };
+    const engine = createLiveEngine({ emptySnapshot: demo });
+    expect(engine.getSnapshot()).toEqual(demo);
+    expect(engine.isRecalled()).toBe(false);
+
+    const saved: EngineSnapshot = {
+      rawPath: [{ x: 0, y: 0, t: 0 }],
+      correctedPath: [{ x: 4, y: 0, t: 10 }],
+      stepCount: 2,
+      heading: 45,
+      pins: [{ id: 'pin', x: 4, y: 0, label: 'pin' }],
+    };
+    engine.recallSnapshot(saved);
+    saved.pins[0]!.label = 'changed';
+
+    const shown = engine.getSnapshot();
+    expect(engine.isRecalled()).toBe(true);
+    expect(shown.stepCount).toBe(2);
+    expect(shown.heading).toBe(45);
+    expect(shown.pins).toEqual([{ id: 'pin', x: 4, y: 0, label: 'pin' }]);
+    expect(shown.correctedPath).not.toBe(saved.correctedPath);
+
+    engine.pushStep({ t: 500, heading: 0 });
+    expect(engine.getSnapshot().stepCount).toBe(2);
+
+    engine.clearRecall();
+    expect(engine.isRecalled()).toBe(false);
+    expect(engine.getSnapshot().stepCount).toBe(1);
+
+    engine.recallSnapshot(saved);
+    engine.reset();
+    expect(engine.isRecalled()).toBe(false);
+    expect(engine.getSnapshot()).toEqual(demo);
   });
 });
 
