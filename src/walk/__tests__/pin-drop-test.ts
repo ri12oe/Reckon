@@ -34,6 +34,12 @@ describe('walk pin drop', () => {
     for (const item of dropped.commit) engine.addPin(item);
 
     expect(dropped.held).toEqual([]);
+    expect(dropped.shown.pins).toContainEqual({
+      id: pin.id,
+      label: pin.label,
+      x: end.x,
+      y: end.y,
+    });
     expect(engine.getSnapshot().pins).toContainEqual({
       id: pin.id,
       label: pin.label,
@@ -57,8 +63,17 @@ describe('walk pin drop', () => {
     const end = live.correctedPath.at(-1);
     if (!end) throw new Error('live path is empty');
     expect(settled.held).toEqual([]);
+    expect(settled.shown.pins).toContainEqual({
+      id: pin.id,
+      label: pin.label,
+      x: end.x,
+      y: end.y,
+    });
     expect(live.pins).toContainEqual({ id: pin.id, label: pin.label, x: end.x, y: end.y });
     expect({ x: end.x, y: end.y }).not.toEqual(demoEnd(demo));
+
+    const again = readWalk(live, demo, false, settled.held);
+    expect(again.commit).toEqual([]);
   });
 
   test('a recalled floor does not take a pin that is still held for the live walk', () => {
