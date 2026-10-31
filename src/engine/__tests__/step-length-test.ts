@@ -267,13 +267,14 @@ describe('calibration scales the integrated path', () => {
 });
 
 describe('getEngine', () => {
-  test('returns the live engine at the origin; mockEngine keeps the static walk', () => {
+  test('serves the demo snapshot until a sample; mockEngine keeps the static walk', () => {
     const snapshot = getEngine().getSnapshot();
-    expect(snapshot.stepCount).toBe(0);
-    expect(snapshot.heading).toBe(0);
-    expect(snapshot.rawPath).toEqual([{ x: 0, y: 0, t: 0 }]);
+    expect(snapshot.stepCount).toBe(12);
+    expect(snapshot.heading).toBe(90);
+    expect(snapshot.rawPath).toHaveLength(7);
     expect(snapshot.correctedPath[0]).toEqual({ x: 0, y: 0, t: 0 });
-    expect(snapshot.pins).toEqual([]);
+    expect(snapshot.pins.map((pin) => pin.id)).toEqual(['door', 'desk']);
+    expect(snapshot).toEqual(mockEngine.getSnapshot());
 
     const mock = mockEngine.getSnapshot();
     expect(mock.stepCount).toBe(12);
