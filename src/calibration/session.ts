@@ -37,6 +37,14 @@ export function leaveCalibration(session: CalibrationSession): CalibrationSessio
   return cancelCalibration(session);
 }
 
+export function parseCourseMeters(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const distanceM = Number(trimmed);
+  if (!Number.isFinite(distanceM) || distanceM <= 0) return null;
+  return distanceM;
+}
+
 export function noteSteps(session: CalibrationSession, progress: number): CalibrationSession {
   if (session.phase !== 'walking') return session;
   if (!Number.isFinite(progress) || progress < CALIBRATION_STEPS) {
