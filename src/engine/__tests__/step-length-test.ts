@@ -3,6 +3,7 @@ import {
   estimateStepLength,
   estimateStepLengthFromSteps,
   getEngine,
+  mockEngine,
   stepLengthOrDefault,
 } from '@/engine';
 import { DEFAULT_STEP_LENGTH_M, integratePath } from '@/engine/path-integration';
@@ -266,13 +267,19 @@ describe('calibration scales the integrated path', () => {
 });
 
 describe('getEngine', () => {
-  test('still returns the static mock snapshot', () => {
+  test('returns the live engine at the origin; mockEngine keeps the static walk', () => {
     const snapshot = getEngine().getSnapshot();
-    expect(snapshot.stepCount).toBe(12);
-    expect(snapshot.heading).toBe(90);
-    expect(snapshot.rawPath).toHaveLength(7);
+    expect(snapshot.stepCount).toBe(0);
+    expect(snapshot.heading).toBe(0);
+    expect(snapshot.rawPath).toEqual([{ x: 0, y: 0, t: 0 }]);
     expect(snapshot.correctedPath[0]).toEqual({ x: 0, y: 0, t: 0 });
-    expect(snapshot.pins.map((pin) => pin.id)).toEqual(['door', 'desk']);
+    expect(snapshot.pins).toEqual([]);
+
+    const mock = mockEngine.getSnapshot();
+    expect(mock.stepCount).toBe(12);
+    expect(mock.heading).toBe(90);
+    expect(mock.rawPath).toHaveLength(7);
+    expect(mock.pins.map((pin) => pin.id)).toEqual(['door', 'desk']);
     expect(typeof estimateStepLength).toBe('function');
   });
 });

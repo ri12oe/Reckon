@@ -1,9 +1,23 @@
-import { mockEngine } from '@/engine/mock-engine';
-import type { FloorwalkerEngine } from '@/engine/types';
+import {
+  createLiveEngine,
+  type LandmarkPin,
+  type LiveEngineConfig,
+  type LiveFloorwalkerEngine,
+} from '@/engine/live-engine';
 
-export function getEngine(): FloorwalkerEngine {
-  return mockEngine;
+/**
+ * Process-wide live engine. Push samples, then read `getSnapshot()`.
+ * Tests build an isolated engine with `createLiveEngine()`.
+ * `mockEngine` is the canned walk.
+ */
+const liveEngine = createLiveEngine();
+
+export function getEngine(): LiveFloorwalkerEngine {
+  return liveEngine;
 }
+
+export { createLiveEngine };
+export type { LandmarkPin, LiveEngineConfig, LiveFloorwalkerEngine };
 
 export type { EngineSnapshot, FloorwalkerEngine, PathPoint, Pin } from '@/engine/types';
 
@@ -67,3 +81,5 @@ export type {
   DriftCorrectionOptions,
   LandmarkTag,
 } from '@/engine/drift-correction';
+
+export { mockEngine } from '@/engine/mock-engine';

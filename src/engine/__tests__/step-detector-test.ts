@@ -1,4 +1,4 @@
-import { getEngine } from '@/engine';
+import { getEngine, mockEngine } from '@/engine';
 import {
   DEFAULT_STEP_DETECTOR_CONFIG,
   STANDARD_GRAVITY_MPS2,
@@ -248,12 +248,19 @@ describe('detectSteps', () => {
 });
 
 describe('getEngine', () => {
-  test('still returns the static mock snapshot', () => {
+  test('returns the live engine at the origin; mockEngine keeps the static walk', () => {
     const snapshot = getEngine().getSnapshot();
-    expect(snapshot.stepCount).toBe(12);
-    expect(snapshot.heading).toBe(90);
-    expect(snapshot.rawPath).toHaveLength(7);
-    expect(snapshot.correctedPath).toHaveLength(7);
-    expect(snapshot.pins.map((pin) => pin.id)).toEqual(['door', 'desk']);
+    expect(snapshot.stepCount).toBe(0);
+    expect(snapshot.heading).toBe(0);
+    expect(snapshot.rawPath).toEqual([{ x: 0, y: 0, t: 0 }]);
+    expect(snapshot.correctedPath).toEqual([{ x: 0, y: 0, t: 0 }]);
+    expect(snapshot.pins).toEqual([]);
+
+    const mock = mockEngine.getSnapshot();
+    expect(mock.stepCount).toBe(12);
+    expect(mock.heading).toBe(90);
+    expect(mock.rawPath).toHaveLength(7);
+    expect(mock.correctedPath).toHaveLength(7);
+    expect(mock.pins.map((pin) => pin.id)).toEqual(['door', 'desk']);
   });
 });
