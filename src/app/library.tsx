@@ -1,10 +1,11 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { ensureDatabase } from '@/db/database';
 import { getFloorStore } from '@/db/floor-store';
 import type { FloorSummary } from '@/db/floors';
 import { getActiveFloor, resumeLiveWalk, showSavedFloor } from '@/db/session';
@@ -14,11 +15,23 @@ import { useTheme } from '@/hooks/use-theme';
 
 export default function LibraryScreen() {
   const theme = useTheme();
-  const store = getFloorStore();
+  const [ready, setReady] = useState(Platform.OS !== 'web');
   const [building, setBuilding] = useState('');
   const [floorName, setFloorName] = useState('');
   const [floors, setFloors] = useState<FloorSummary[]>([]);
   const [status, setStatus] = useState('');
+  const store = ready ? getFloorStore() : null;
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    let cancelled = false;
+    void ensureDatabase().then(() => {
+      if (!cancelled) setReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const reload = useCallback(() => {
     setFloors(getFloorStore().list());
@@ -26,11 +39,13 @@ export default function LibraryScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (!ready) return;
       reload();
-    }, [reload]),
+    }, [ready, reload]),
   );
 
   const save = () => {
+    if (!store) return;
     try {
       const saved = store.save({
         buildingName: building,
@@ -45,6 +60,7 @@ export default function LibraryScreen() {
   };
 
   const load = (id: string) => {
+    if (!store) return;
     const floor = store.get(id);
     if (!floor) {
       setStatus('That floor is no longer saved.');
@@ -56,6 +72,7 @@ export default function LibraryScreen() {
   };
 
   const share = async (id: string) => {
+    if (!store) return;
     const floor = store.get(id);
     if (!floor) {
       setStatus('That floor is no longer saved.');
@@ -73,6 +90,7 @@ export default function LibraryScreen() {
     const floor = floors.find((item) => item.id === id);
     const label = floor ? `${floor.buildingName} / ${floor.name}` : 'this floor';
     const run = () => {
+      if (!store) return;
       store.delete(id);
       if (getActiveFloor()?.id === id) resumeLiveWalk();
       reload();
@@ -95,11 +113,11 @@ export default function LibraryScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        {store.persistent ? null : (
+        {store && !store.persistent ? (
           <ThemedText type="small" themeColor="textSecondary">
             SQLite is off in this browser. Floors stay in memory until you reload.
           </ThemedText>
-        )}
+        ) : null}
         <TextInput
           value={building}
           onChangeText={setBuilding}

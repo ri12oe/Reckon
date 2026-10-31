@@ -10,10 +10,6 @@ let memory: FloorStore | null = null;
 let sqliteStore: FloorStore | null = null;
 let sqliteDb: SqlExecutor | null = null;
 
-/**
- * Native builds write the floor tables. Web `getDatabase()` is null, so the
- * library keeps the same records in memory for the browser session.
- */
 export function getFloorStore(): FloorStore {
   const db = getDatabase();
   if (!db) {
