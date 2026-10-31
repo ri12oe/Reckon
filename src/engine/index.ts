@@ -50,3 +50,20 @@ export {
   stepLengthOrDefault,
 } from '@/engine/step-length';
 export type { CalibrationWalk, StepLengthEstimate } from '@/engine/step-length';
+
+export {
+  CORRIDOR_AXES_DEG,
+  DEFAULT_CORRIDOR_SNAP_CONFIG,
+  alignLandmarks,
+  closeLoop,
+  correctDrift,
+  nearestCorridorAxis,
+  snapCorridor,
+} from '@/engine/drift-correction';
+export type {
+  CorridorAxis,
+  CorridorSnapConfig,
+  DriftCorrection,
+  DriftCorrectionOptions,
+  LandmarkTag,
+} from '@/engine/drift-correction';
