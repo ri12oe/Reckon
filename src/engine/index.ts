@@ -34,3 +34,11 @@ export type {
   HeadingFusionConfig,
   MagSample,
 } from '@/engine/heading-fusion';
+
+export {
+  DEFAULT_PATH_INTEGRATION_CONFIG,
+  DEFAULT_STEP_LENGTH_M,
+  integratePath,
+  stepOffset,
+} from '@/engine/path-integration';
+export type { HeadingSample, PathIntegrationConfig, PathStep } from '@/engine/path-integration';
