@@ -1,4 +1,4 @@
-import { type ComponentType, useEffect, useState } from 'react';
+import { type ComponentType, type ReactNode, useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { version } from 'canvaskit-wasm/package.json';
 
@@ -9,6 +9,8 @@ import type { MapPathMode } from '@/map/geometry';
 type MapProps = {
   snapshot: EngineSnapshot;
   mode: MapPathMode;
+  summary?: string;
+  toolbar?: ReactNode;
 };
 
 export default function SkiaMap(props: MapProps) {
@@ -37,18 +39,13 @@ export default function SkiaMap(props: MapProps) {
     };
   }, []);
 
-  if (error) {
+  if (error || !CanvasView) {
     return (
       <View style={fill}>
-        <ThemedText>{error}</ThemedText>
-      </View>
-    );
-  }
-
-  if (!CanvasView) {
-    return (
-      <View style={fill}>
-        <ThemedText>loading canvas</ThemedText>
+        {props.toolbar}
+        <ThemedText type="small" themeColor="textSecondary" style={center}>
+          {error ?? 'Loading map…'}
+        </ThemedText>
       </View>
     );
   }
@@ -56,4 +53,5 @@ export default function SkiaMap(props: MapProps) {
   return <CanvasView {...props} />;
 }
 
-const fill = { flex: 1, width: '100%' } as const;
+const fill = { flex: 1, width: '100%', gap: 8 } as const;
+const center = { textAlign: 'center', marginTop: 24 } as const;

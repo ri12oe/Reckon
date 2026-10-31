@@ -1,12 +1,15 @@
-import { Canvas, Circle, Path } from '@shopify/react-native-skia';
+import { Canvas, Circle, Group, Path } from '@shopify/react-native-skia';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { PathMarkers } from '@/components/path-markers';
 import type { EngineSnapshot, PathPoint } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
 
-const PAD = 24;
+const PAD = 40;
 const PIN_RADIUS = 6;
+/** Meters shown around you in follow mode. */
+const FOLLOW_SPAN_M = 12;
 
 type XY = { x: number; y: number };
 
@@ -50,14 +53,30 @@ function project(points: readonly PathPoint[], place: (point: XY) => XY) {
   return `M ${first.x} ${first.y} ${rest.join(' ')}`;
 }
 
-export default function WalkCanvas({ snapshot }: { snapshot: EngineSnapshot }) {
+type Props = {
+  snapshot: EngineSnapshot;
+  /** Frame the area around where you are instead of the whole walk. */
+  follow?: boolean;
+};
+
+export default function WalkCanvas({ snapshot, follow = false }: Props) {
   const theme = useTheme();
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const frame = [...snapshot.rawPath, ...snapshot.correctedPath, ...snapshot.pins];
+  const here = snapshot.correctedPath[snapshot.correctedPath.length - 1];
+  const frame =
+    follow && here
+      ? [
+          { x: here.x - FOLLOW_SPAN_M / 2, y: here.y - FOLLOW_SPAN_M / 2 },
+          { x: here.x + FOLLOW_SPAN_M / 2, y: here.y + FOLLOW_SPAN_M / 2 },
+        ]
+      : [...snapshot.rawPath, ...snapshot.correctedPath, ...snapshot.pins];
   const place = makeProjector(frame, size.width, size.height);
   const raw = place ? project(snapshot.rawPath, place) : '';
   const corrected = place ? project(snapshot.correctedPath, place) : '';
   const pins = place ? snapshot.pins.map((pin) => ({ id: pin.id, ...place(pin) })) : [];
+  const path = snapshot.correctedPath;
+  const start = place && path.length > 0 ? place(path[0]) : null;
+  const end = place && path.length > 0 ? place(path[path.length - 1]) : null;
 
   return (
     <View
@@ -72,13 +91,31 @@ export default function WalkCanvas({ snapshot }: { snapshot: EngineSnapshot }) {
       {size.width > 0 && size.height > 0 ? (
         <Canvas style={StyleSheet.absoluteFill}>
           {raw ? (
-            <Path path={raw} color={theme.textSecondary} style="stroke" strokeWidth={2} />
+            <Path
+              path={raw}
+              color={theme.pathRaw}
+              style="stroke"
+              strokeWidth={2}
+              strokeCap="round"
+              strokeJoin="round"
+            />
           ) : null}
           {corrected ? (
-            <Path path={corrected} color={theme.text} style="stroke" strokeWidth={3} />
+            <Path
+              path={corrected}
+              color={theme.pathCorrected}
+              style="stroke"
+              strokeWidth={4}
+              strokeCap="round"
+              strokeJoin="round"
+            />
           ) : null}
+          <PathMarkers start={start} end={end} heading={snapshot.heading} />
           {pins.map((pin) => (
-            <Circle key={pin.id} cx={pin.x} cy={pin.y} r={PIN_RADIUS} color={theme.accent} />
+            <Group key={pin.id}>
+              <Circle cx={pin.x} cy={pin.y} r={PIN_RADIUS + 2.5} color="#ffffff" />
+              <Circle cx={pin.x} cy={pin.y} r={PIN_RADIUS} color={theme.accent} />
+            </Group>
           ))}
         </Canvas>
       ) : null}

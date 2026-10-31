@@ -2,6 +2,8 @@ import { type ComponentRef, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
 
 import { setAppearance, type AppearancePreference } from '@/appearance';
+import { Glass } from '@/components/glass';
+import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useAppearance } from '@/hooks/use-appearance';
@@ -16,15 +18,6 @@ const options: { value: AppearancePreference; label: string; detail?: string }[]
 ];
 
 type Anchor = { top: number; right: number };
-
-/** Half-filled circle, the usual light/dark symbol. */
-function AppearanceIcon({ color }: { color: string }) {
-  return (
-    <View style={[styles.icon, { borderColor: color }]}>
-      <View style={[styles.iconHalf, { backgroundColor: color }]} />
-    </View>
-  );
-}
 
 /**
  * Lets Reckon follow the phone (System) or stay Light or Dark regardless
@@ -55,12 +48,10 @@ export function AppearanceMenu() {
         accessibilityLabel="Appearance"
         accessibilityHint="Choose light, dark, or match your phone"
         onPress={open}
-        style={({ pressed }) => [
-          styles.button,
-          { backgroundColor: theme.backgroundElement, opacity: pressed ? 0.7 : 1 },
-        ]}
+        style={({ pressed }) => [styles.button, { opacity: pressed ? 0.7 : 1 }]}
       >
-        <AppearanceIcon color={theme.text} />
+        <Glass style={[StyleSheet.absoluteFill, styles.buttonGlass]} />
+        <Icon name="appearance" color={theme.text} />
       </Pressable>
       <Modal
         visible={anchor !== null}
@@ -82,11 +73,10 @@ export function AppearanceMenu() {
                 top: anchor.top,
                 left: Math.max(Spacing.three, anchor.right - MENU_WIDTH),
                 backgroundColor: theme.backgroundElement,
-                borderColor: theme.backgroundSelected,
               },
             ]}
           >
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.title}>
+            <ThemedText type="caption" themeColor="textSecondary" style={styles.title}>
               Appearance
             </ThemedText>
             {options.map((option) => {
@@ -101,7 +91,7 @@ export function AppearanceMenu() {
                   onPress={() => choose(option.value)}
                   style={({ pressed }) => [
                     styles.row,
-                    (selected || pressed) && { backgroundColor: theme.backgroundSelected },
+                    (selected || pressed) && { backgroundColor: theme.glassSelected },
                   ]}
                 >
                   <View style={styles.rowText}>
@@ -112,11 +102,7 @@ export function AppearanceMenu() {
                       </ThemedText>
                     ) : null}
                   </View>
-                  {selected ? (
-                    <ThemedText type="smallBold" style={{ color: theme.accent }}>
-                      ✓
-                    </ThemedText>
-                  ) : null}
+                  {selected ? <Icon name="check" color={theme.accent} size={18} /> : null}
                 </Pressable>
               );
             })}
@@ -129,32 +115,19 @@ export function AppearanceMenu() {
 
 const styles = StyleSheet.create({
   button: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  icon: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    overflow: 'hidden',
-  },
-  iconHalf: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: '50%',
+  buttonGlass: {
+    borderRadius: 24,
   },
   menu: {
     position: 'absolute',
     width: MENU_WIDTH,
     padding: Spacing.one + Spacing.half,
-    borderRadius: Radius.medium + Spacing.two,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.card,
     shadowColor: '#000',
     shadowOpacity: 0.25,
     shadowRadius: 24,

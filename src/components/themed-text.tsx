@@ -4,7 +4,22 @@ import { Fonts, ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type ThemedTextProps = TextProps & {
-  type?: 'default' | 'title' | 'small' | 'smallBold' | 'subtitle' | 'link' | 'linkPrimary' | 'code';
+  type?:
+    | 'default'
+    | 'title'
+    | 'small'
+    | 'smallBold'
+    | 'subtitle'
+    | 'link'
+    | 'linkPrimary'
+    | 'code'
+    | 'largeTitle'
+    | 'title2'
+    | 'headline'
+    | 'footnote'
+    | 'caption'
+    | 'metric'
+    | 'metricLarge';
   themeColor?: ThemeColor;
 };
 
@@ -48,6 +63,48 @@ const styles = StyleSheet.create({
     lineHeight: 30,
     fontSize: 14,
     color: '#3c87f7',
+  },
+  largeTitle: {
+    fontSize: 34,
+    lineHeight: 41,
+    fontWeight: 700,
+    letterSpacing: 0.4,
+  },
+  title2: {
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: 700,
+  },
+  headline: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: 600,
+  },
+  footnote: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: 400,
+  },
+  caption: {
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: 600,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  metric: {
+    fontFamily: Fonts.rounded,
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: 700,
+    fontVariant: ['tabular-nums'],
+  },
+  metricLarge: {
+    fontFamily: Fonts.rounded,
+    fontSize: 56,
+    lineHeight: 64,
+    fontWeight: 700,
+    fontVariant: ['tabular-nums'],
   },
   code: {
     fontFamily: Fonts.mono,

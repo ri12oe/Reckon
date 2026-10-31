@@ -9,21 +9,32 @@ import { Spacing } from '@/constants/theme';
 
 type Props = {
   title: string;
+  subtitle?: string;
   /** Controls shown at the right of the title, such as the Appearance button. */
   headerRight?: ReactNode;
+  /** Full-bleed layer drawn behind the whole screen, such as the map grid. */
+  background?: ReactNode;
   children?: ReactNode;
 };
 
-export function Screen({ title, headerRight, children }: Props) {
+export function Screen({ title, subtitle, headerRight, background, children }: Props) {
   return (
     <ThemedView style={styles.screen}>
+      {background}
       <TabBarInset>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.safe}>
           <View style={styles.header}>
-            <ThemedText type="subtitle" accessibilityRole="header">
-              {title}
-            </ThemedText>
-            {headerRight}
+            <View style={styles.titles}>
+              <ThemedText type="largeTitle" accessibilityRole="header">
+                {title}
+              </ThemedText>
+              {subtitle ? (
+                <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                  {subtitle}
+                </ThemedText>
+              ) : null}
+            </View>
+            {headerRight ? <View style={styles.right}>{headerRight}</View> : null}
           </View>
           <View style={styles.body}>{children}</View>
         </SafeAreaView>
@@ -39,7 +50,7 @@ const styles = StyleSheet.create({
   },
   safe: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
+    paddingHorizontal: Spacing.three,
     paddingTop: Spacing.three,
     paddingBottom: Spacing.three,
     gap: Spacing.three,
@@ -49,6 +60,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.three,
+    paddingHorizontal: Spacing.one,
+  },
+  titles: {
+    flexShrink: 1,
+  },
+  right: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
   },
   body: {
     flex: 1,
