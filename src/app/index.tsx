@@ -1,11 +1,12 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
+import { Button } from '@/components/button';
 import { Screen } from '@/components/screen';
 import SkiaWalk from '@/components/skia-walk';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { getActiveFloor, resumeLiveWalk, type ActiveFloor } from '@/db/session';
 import { getEngine, mockEngine, type EngineSnapshot, type LiveFloorwalkerEngine } from '@/engine';
 import { lightHaptic } from '@/haptics';
@@ -85,41 +86,65 @@ export default function WalkScreen() {
   return (
     <Screen title="Walk">
       <View style={styles.readout}>
-        <ThemedText>steps {snapshot.stepCount}</ThemedText>
+        <View>
+          <ThemedText type="small" themeColor="textSecondary">
+            Steps
+          </ThemedText>
+          <ThemedText type="subtitle" accessibilityLiveRegion="polite">
+            {snapshot.stepCount}
+          </ThemedText>
+        </View>
         <View style={styles.heading}>
           <View style={[styles.needle, { transform: [{ rotate: `${heading}deg` }] }]}>
-            <ThemedText>↑</ThemedText>
+            <ThemedText type="subtitle" style={{ color: theme.accent }}>
+              ↑
+            </ThemedText>
           </View>
-          <ThemedText>heading {Math.round(heading)}°</ThemedText>
+          <View>
+            <ThemedText type="small" themeColor="textSecondary">
+              Heading
+            </ThemedText>
+            <ThemedText type="subtitle">{Math.round(heading)}°</ThemedText>
+          </View>
         </View>
       </View>
-      <ThemedText type="small" themeColor="textSecondary">
-        thin line is raw, thick line is corrected
-      </ThemedText>
       {active ? (
-        <ThemedText type="small">
-          saved floor {active.buildingName} / {active.name}
-        </ThemedText>
+        <View style={[styles.banner, { backgroundColor: theme.backgroundElement }]}>
+          <View style={styles.bannerText}>
+            <ThemedText type="small" themeColor="textSecondary">
+              Viewing saved floor
+            </ThemedText>
+            <ThemedText type="smallBold">
+              {active.buildingName} / {active.name}
+            </ThemedText>
+          </View>
+          <Button label="Resume live walk" variant="primary" compact onPress={resume} />
+        </View>
       ) : null}
+      <View style={styles.legend}>
+        <View style={styles.legendItem}>
+          <View
+            style={[styles.swatch, styles.swatchRaw, { backgroundColor: theme.textSecondary }]}
+          />
+          <ThemedText type="small" themeColor="textSecondary">
+            Raw
+          </ThemedText>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.swatch, { backgroundColor: theme.text }]} />
+          <ThemedText type="small" themeColor="textSecondary">
+            Corrected
+          </ThemedText>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.dot, { backgroundColor: theme.accent }]} />
+          <ThemedText type="small" themeColor="textSecondary">
+            Pin
+          </ThemedText>
+        </View>
+      </View>
       <SkiaWalk snapshot={snapshot} />
-      {active ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Resume live walk"
-          onPress={resume}
-          style={[styles.pinButton, { backgroundColor: theme.backgroundElement }]}
-        >
-          <ThemedText>resume live walk</ThemedText>
-        </Pressable>
-      ) : (
-        <Pressable
-          accessibilityRole="button"
-          onPress={dropPin}
-          style={[styles.pinButton, { backgroundColor: theme.backgroundElement }]}
-        >
-          <ThemedText>drop pin</ThemedText>
-        </Pressable>
-      )}
+      {active ? null : <Button label="Drop pin" variant="primary" onPress={dropPin} />}
     </Screen>
   );
 }
@@ -137,14 +162,41 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   needle: {
-    width: 28,
-    height: 28,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pinButton: {
+  banner: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Spacing.three,
-    paddingHorizontal: Spacing.four,
+    gap: Spacing.three,
+    padding: Spacing.three,
+    borderRadius: Radius.medium,
+  },
+  bannerText: {
+    flex: 1,
+  },
+  legend: {
+    flexDirection: 'row',
+    gap: Spacing.three,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+  },
+  swatch: {
+    width: 16,
+    height: 3,
+    borderRadius: 2,
+  },
+  swatchRaw: {
+    height: 2,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
 });
