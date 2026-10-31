@@ -1,10 +1,14 @@
 import { type ComponentType, useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { version } from 'canvaskit-wasm/package.json';
 
 import { ThemedText } from '@/components/themed-text';
+import type { EngineSnapshot } from '@/engine';
 
-export default function SkiaWalk() {
-  const [CanvasView, setCanvasView] = useState<ComponentType | null>(null);
+type WalkCanvasProps = { snapshot: EngineSnapshot };
+
+export default function SkiaWalk({ snapshot }: WalkCanvasProps) {
+  const [CanvasView, setCanvasView] = useState<ComponentType<WalkCanvasProps> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,12 +38,22 @@ export default function SkiaWalk() {
   }, []);
 
   if (error) {
-    return <ThemedText>{error}</ThemedText>;
+    return (
+      <View style={fill}>
+        <ThemedText>{error}</ThemedText>
+      </View>
+    );
   }
 
   if (!CanvasView) {
-    return <ThemedText>loading canvas</ThemedText>;
+    return (
+      <View style={fill}>
+        <ThemedText>loading canvas</ThemedText>
+      </View>
+    );
   }
 
-  return <CanvasView />;
+  return <CanvasView snapshot={snapshot} />;
 }
+
+const fill = { flex: 1, width: '100%' } as const;
