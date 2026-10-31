@@ -6,6 +6,7 @@ import { Screen } from '@/components/screen';
 import SkiaMap from '@/components/skia-map';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { getActiveFloor, type ActiveFloor } from '@/db/session';
 import { getEngine, type EngineSnapshot } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
 import type { MapPathMode } from '@/map/geometry';
@@ -19,11 +20,15 @@ export default function MapScreen() {
   const theme = useTheme();
   const [snapshot, setSnapshot] = useState<EngineSnapshot>(() => getEngine().getSnapshot());
   const [mode, setMode] = useState<MapPathMode>('corrected');
+  const [active, setActive] = useState<ActiveFloor | null>(() => getActiveFloor());
 
   useFocusEffect(
     useCallback(() => {
       const engine = getEngine();
-      const read = () => setSnapshot(engine.getSnapshot());
+      const read = () => {
+        setSnapshot(engine.getSnapshot());
+        setActive(getActiveFloor());
+      };
       read();
       const timer = setInterval(read, POLL_MS);
       return () => clearInterval(timer);
@@ -32,6 +37,11 @@ export default function MapScreen() {
 
   return (
     <Screen title="Map">
+      {active ? (
+        <ThemedText>
+          {active.buildingName} / {active.name}
+        </ThemedText>
+      ) : null}
       <View style={styles.modes}>
         {modes.map((item) => {
           const selected = mode === item;
@@ -55,7 +65,8 @@ export default function MapScreen() {
         })}
       </View>
       <ThemedText type="small" themeColor="textSecondary">
-        pinch to zoom, drag to pan
+        {snapshot.stepCount} steps · {snapshot.correctedPath.length} points · {snapshot.pins.length}{' '}
+        pins · pinch to zoom, drag to pan
       </ThemedText>
       <SkiaMap snapshot={snapshot} mode={mode} />
     </Screen>
