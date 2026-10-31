@@ -535,18 +535,18 @@ describe('drift correction on the live path', () => {
 });
 
 describe('getEngine', () => {
-  test('returns one live engine at the origin, and mockEngine keeps the static walk', () => {
+  test('returns one live engine and serves the demo until the first sample', () => {
     expect(getEngine()).toBe(getEngine());
     expect(getEngine()).not.toBe(mockEngine);
     expect(getEngine()).not.toBe(createLiveEngine());
+    expect(typeof getEngine().startSensors).toBe('function');
+    expect(typeof getEngine().stopSensors).toBe('function');
 
-    expect(getEngine().getSnapshot()).toEqual({
-      rawPath: [{ x: 0, y: 0, t: 0 }],
-      correctedPath: [{ x: 0, y: 0, t: 0 }],
-      stepCount: 0,
-      heading: 0,
-      pins: [],
-    });
+    const snapshot = getEngine().getSnapshot();
+    expect(snapshot).toEqual(mockEngine.getSnapshot());
+    expect(snapshot).not.toBe(mockEngine.getSnapshot());
+    expect(snapshot.stepCount).toBe(12);
+    expect(snapshot.heading).toBe(90);
 
     const mock = mockEngine.getSnapshot();
     expect(mock.stepCount).toBe(12);

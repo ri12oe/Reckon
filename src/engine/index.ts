@@ -4,16 +4,31 @@ import {
   type LiveEngineConfig,
   type LiveFloorwalkerEngine,
 } from '@/engine/live-engine';
+import { mockEngine } from '@/engine/mock-engine';
+import type { StartSensorFeedOptions } from '@/engine/sensor-feed';
 
 /**
- * Process-wide live engine. Push samples, then read `getSnapshot()`.
- * Tests build an isolated engine with `createLiveEngine()`.
- * `mockEngine` is the canned walk.
+ * Process-wide live engine. `startSensors` / `stopSensors` subscribe it.
+ * Until the first finite sample, `getSnapshot` is the static demo from
+ * `mockEngine`, which stays exported. Tests build an isolated engine
+ * with `createLiveEngine()`.
  */
-const liveEngine = createLiveEngine();
+const liveEngine = createLiveEngine({ emptySnapshot: mockEngine.getSnapshot() });
 
 export function getEngine(): LiveFloorwalkerEngine {
   return liveEngine;
+}
+
+export function getLiveEngine(): LiveFloorwalkerEngine {
+  return liveEngine;
+}
+
+export function startSensors(options?: StartSensorFeedOptions): Promise<void> {
+  return liveEngine.startSensors(options);
+}
+
+export function stopSensors(): void {
+  liveEngine.stopSensors();
 }
 
 export { createLiveEngine };
@@ -83,3 +98,18 @@ export type {
 } from '@/engine/drift-correction';
 
 export { mockEngine } from '@/engine/mock-engine';
+
+export {
+  DEFAULT_SENSOR_UPDATE_INTERVAL_MS,
+  loadExpoMotionSensors,
+  startSensorFeed,
+} from '@/engine/sensor-feed';
+export type {
+  MotionSensor,
+  MotionSensors,
+  SensorFeed,
+  SensorFeedSink,
+  SensorMeasurement,
+  SensorSubscription,
+  StartSensorFeedOptions,
+} from '@/engine/sensor-feed';

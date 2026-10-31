@@ -10,9 +10,14 @@
  * 4. `integratePath` → the raw walk.
  * 5. `correctDrift` → the corrected walk (corridor snap by default).
  *
- * Samples are pushed in. `getSnapshot()` runs the pipeline. A finite
- * `pushStep` selects the explicit step list and accelerometer peaks are
- * not counted until `reset()`. A step's own heading displaces that step.
+ * Samples are pushed in, including from `startSensors` (the Expo motion
+ * feed). `getSnapshot()` runs the pipeline. A finite `pushStep` selects
+ * the explicit step list and accelerometer peaks are not counted until
+ * `reset()`. A step's own heading displaces that step.
+ *
+ * `emptySnapshot`, when set, is what `getSnapshot` returns until the first
+ * finite accel, gyro, mag, step, or heading sample. `reset()` arms it again.
+ * The shared engine uses that for the static demo walk.
  * `EngineSnapshot.heading` is the course: the latest fused heading, else
  * the latest pushed heading, else the latest step heading, else the
  * configured initial heading (0°).
@@ -39,6 +44,11 @@ import {
   type HeadingSample,
   type PathStep,
 } from '@/engine/path-integration';
+import {
+  startSensorFeed,
+  type SensorFeed,
+  type StartSensorFeedOptions,
+} from '@/engine/sensor-feed';
 import { detectSteps, type StepDetectorConfig, type StepSample } from '@/engine/step-detector';
 import {
   countCalibrationSteps,
@@ -63,6 +73,12 @@ export type LiveEngineConfig = {
   originY?: number;
   /** Origin timestamp, milliseconds. */
   originT?: number;
+  /**
+   * Served by `getSnapshot` until the first finite sample.
+   * The shared engine passes the static demo so screens keep that walk
+   * until a sensor actually delivers data.
+   */
+  emptySnapshot?: EngineSnapshot;
 };
 
 /** A landmark tag. `pathIndex` defaults to the end of the current walk. */
@@ -95,6 +111,8 @@ export type LiveFloorwalkerEngine = FloorwalkerEngine & {
   tagLandmark(tag: LandmarkPin): void;
   reset(): void;
   getStepLength(): number;
+  startSensors(options?: StartSensorFeedOptions): Promise<void>;
+  stopSensors(): void;
 };
 
 type PinRecord = Pin & { anchored: boolean };
@@ -117,6 +135,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   const originT = finiteOr(config?.originT, 0);
   const initialLength = finiteOr(config?.stepLengthM, DEFAULT_STEP_LENGTH_M);
   const initialDrift = seedDrift(config?.drift);
+  const emptySnapshot = config?.emptySnapshot;
 
   const accels: StepSample[] = [];
   const gyros: GyroSample[] = [];
@@ -126,6 +145,10 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   let stepLengthM = initialLength;
   let drift = cloneDrift(initialDrift);
   let cached: EngineSnapshot | null = null;
+  let accepted = false;
+  let feed: SensorFeed | null = null;
+  let starting: Promise<void> | null = null;
+  let generation = 0;
 
   const touch = () => {
     cached = null;
@@ -179,25 +202,37 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     };
   }
 
-  return {
+  const engine: LiveFloorwalkerEngine = {
     pushAccel(sample) {
       accels.push(copyAccel(sample));
+      if (accelAccepted(sample)) accepted = true;
       touch();
     },
     pushGyro(sample) {
       gyros.push({ t: sample.t, yawRate: sample.yawRate });
+      if (Number.isFinite(sample.t) && Number.isFinite(sample.yawRate)) accepted = true;
       touch();
     },
     pushMag(sample) {
       mags.push({ t: sample.t, x: sample.x, y: sample.y, z: sample.z });
+      if (
+        Number.isFinite(sample.t) &&
+        Number.isFinite(sample.x) &&
+        Number.isFinite(sample.y) &&
+        Number.isFinite(sample.z)
+      ) {
+        accepted = true;
+      }
       touch();
     },
     pushStep(step) {
       explicitSteps.push(copyPathStep(step));
+      if (Number.isFinite(step.t)) accepted = true;
       touch();
     },
     pushHeading(sample) {
       headingSamples.push(copyHeading(sample));
+      if (Number.isFinite(sample.t) && Number.isFinite(sample.heading)) accepted = true;
       touch();
     },
     setStepLength(next) {
@@ -257,16 +292,61 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       headingSamples.length = 0;
       stepLengthM = initialLength;
       drift = cloneDrift(initialDrift);
+      accepted = false;
       touch();
     },
     getStepLength() {
       return stepLengthM;
     },
     getSnapshot() {
+      if (!accepted && emptySnapshot) return cloneSnapshot(emptySnapshot);
       cached ??= compute();
       return cloneSnapshot(cached);
     },
+    startSensors(sensorOptions) {
+      if (feed) return Promise.resolve();
+      if (starting) return starting;
+
+      const token = generation;
+      const pending = startSensorFeed(
+        {
+          pushAccel(sample) {
+            if (token !== generation) return;
+            engine.pushAccel(sample);
+          },
+          pushGyro(sample) {
+            if (token !== generation) return;
+            engine.pushGyro(sample);
+          },
+          pushMag(sample) {
+            if (token !== generation) return;
+            engine.pushMag(sample);
+          },
+        },
+        sensorOptions,
+      ).then((next) => {
+        if (token !== generation) {
+          next.stop();
+          return;
+        }
+        feed = next;
+      });
+
+      starting = pending;
+      return pending.finally(() => {
+        if (starting === pending) starting = null;
+      });
+    },
+    stopSensors() {
+      generation += 1;
+      const current = feed;
+      feed = null;
+      starting = null;
+      current?.stop();
+    },
   };
+
+  return engine;
 }
 
 function seedDrift(drift: DriftCorrectionOptions | undefined): DriftState {
@@ -400,6 +480,14 @@ function resolvedInitialHeading(config: Partial<HeadingFusionConfig> | undefined
   const value = config?.initialHeadingDeg;
   if (value === undefined || !Number.isFinite(value)) return 0;
   return wrap360(value);
+}
+
+function accelAccepted(sample: StepSample): boolean {
+  if (!Number.isFinite(sample.t)) return false;
+  if ('x' in sample) {
+    return Number.isFinite(sample.x) && Number.isFinite(sample.y) && Number.isFinite(sample.z);
+  }
+  return Number.isFinite(sample.magnitude);
 }
 
 function copyAccel(sample: StepSample): StepSample {

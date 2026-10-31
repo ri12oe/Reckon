@@ -33,7 +33,13 @@
           "imageWidth": 76
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Allow Reckon to read motion sensors to track your walk."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
