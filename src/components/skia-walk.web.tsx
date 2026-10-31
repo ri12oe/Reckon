@@ -5,9 +5,9 @@ import { version } from 'canvaskit-wasm/package.json';
 import { ThemedText } from '@/components/themed-text';
 import type { EngineSnapshot } from '@/engine';
 
-type WalkCanvasProps = { snapshot: EngineSnapshot };
+type WalkCanvasProps = { snapshot: EngineSnapshot; follow?: boolean };
 
-export default function SkiaWalk({ snapshot }: WalkCanvasProps) {
+export default function SkiaWalk(props: WalkCanvasProps) {
   const [CanvasView, setCanvasView] = useState<ComponentType<WalkCanvasProps> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,7 +53,7 @@ export default function SkiaWalk({ snapshot }: WalkCanvasProps) {
     );
   }
 
-  return <CanvasView snapshot={snapshot} />;
+  return <CanvasView {...props} />;
 }
 
 const fill = { flex: 1, width: '100%' } as const;

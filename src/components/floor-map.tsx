@@ -1,4 +1,4 @@
-import { Canvas, Circle, Path } from '@shopify/react-native-skia';
+import { Canvas, Circle, Group, Path } from '@shopify/react-native-skia';
 import {
   type ComponentRef,
   useCallback,
@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
@@ -19,7 +20,9 @@ import {
 } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
-import { Button } from '@/components/button';
+import { IconButton } from '@/components/button';
+import { Glass } from '@/components/glass';
+import { PathMarkers } from '@/components/path-markers';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import type { EngineSnapshot } from '@/engine';
@@ -52,13 +55,24 @@ import {
 } from '@/map/geometry';
 
 const PIN_RADIUS = 6;
+/** Room for the heading cone around the path ends. */
+const MARKER_PAD = 40;
+/** The zoom column covers the right edge, so the fitted path stays left of it. */
+const ZOOM_GUTTER = 56;
 
 type Props = {
   snapshot: EngineSnapshot;
   mode: MapPathMode;
+  /** Shown in the glass strip at the bottom until a pin is tapped. */
+  summary?: string;
+  /** Shown above the map, such as the Raw/Corrected switch. */
+  toolbar?: ReactNode;
 };
 
-export default function FloorMap({ snapshot, mode }: Props) {
+/** Each tap on + or − zooms by this much about the middle of the map. */
+const ZOOM_STEP = 1.5;
+
+export default function FloorMap({ snapshot, mode, summary, toolbar }: Props) {
   const theme = useTheme();
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -70,7 +84,10 @@ export default function FloorMap({ snapshot, mode }: Props) {
 
   const worldBounds = fitBoundsFor(framePoints(snapshot));
   const place = useMemo(
-    () => (fitted ? makeProjectorFromBounds(fitted, size.width, size.height) : null),
+    () =>
+      fitted
+        ? makeProjectorFromBounds(fitted, size.width - ZOOM_GUTTER, size.height, MARKER_PAD)
+        : null,
     [fitted, size.height, size.width],
   );
   const placedPath = useMemo(() => {
@@ -129,6 +146,26 @@ export default function FloorMap({ snapshot, mode }: Props) {
     scale.value = 1;
     translateX.value = 0;
     translateY.value = 0;
+  };
+
+  const zoomBy = (factor: number) => {
+    adjusted.current = true;
+    const current = {
+      scale: scale.value,
+      translateX: translateX.value,
+      translateY: translateY.value,
+    };
+    const next = zoomAt(current, { x: widthSv.value / 2, y: heightSv.value / 2 }, factor);
+    const clamped = clampTranslation(
+      { x: next.translateX, y: next.translateY },
+      next.scale,
+      widthSv.value,
+      heightSv.value,
+      48,
+    );
+    scale.value = next.scale;
+    translateX.value = clamped.x;
+    translateY.value = clamped.y;
   };
 
   useLayoutEffect(() => {
@@ -325,39 +362,22 @@ export default function FloorMap({ snapshot, mode }: Props) {
   });
 
   const line = pathToSvg(placedPath);
-  const stroke = mode === 'raw' ? theme.textSecondary : theme.text;
-  const strokeWidth = mode === 'raw' ? 2 : 3;
+  const stroke = mode === 'raw' ? theme.pathRaw : theme.pathCorrected;
+  const strokeWidth = mode === 'raw' ? 2 : 4;
+  const start = placedPath[0] ?? null;
+  const end = placedPath[placedPath.length - 1] ?? null;
 
   return (
     <View style={styles.fill}>
-      <View style={styles.bar}>
-        <ThemedText
-          type="small"
-          themeColor={selected ? 'text' : 'textSecondary'}
-          testID="map-pin-label"
-        >
-          {selected
-            ? selected.label
-            : placedPins.length > 0
-              ? 'Tap a pin to see its name'
-              : 'Pinch to zoom, drag to pan'}
-        </ThemedText>
-        <Button
-          label="Fit"
-          accessibilityLabel="Fit path"
-          testID="map-fit"
-          compact
-          onPress={fitToContent}
-        />
-      </View>
+      {toolbar}
       <View
         ref={stageRef}
         testID="map-stage"
-        style={[styles.stage, { backgroundColor: theme.backgroundElement }]}
+        style={styles.stage}
         onLayout={(event) => {
           const { width, height } = event.nativeEvent.layout;
-          widthSv.value = width;
-          heightSv.value = height;
+          widthSv.set(width);
+          heightSv.set(height);
           attachWheel();
           setSize((current) =>
             current.width === width && current.height === height ? current : { width, height },
@@ -380,14 +400,18 @@ export default function FloorMap({ snapshot, mode }: Props) {
                   strokeJoin="round"
                 />
               ) : null}
+              <PathMarkers start={start} end={end} heading={snapshot.heading} />
               {placedPins.map((pin) => (
-                <Circle key={pin.id} cx={pin.x} cy={pin.y} r={PIN_RADIUS} color={theme.accent} />
+                <Group key={pin.id}>
+                  <Circle cx={pin.x} cy={pin.y} r={PIN_RADIUS + 2.5} color="#ffffff" />
+                  <Circle cx={pin.x} cy={pin.y} r={PIN_RADIUS} color={theme.accent} />
+                </Group>
               ))}
               {selected ? (
                 <Circle
                   cx={selected.x}
                   cy={selected.y}
-                  r={PIN_RADIUS + 4}
+                  r={PIN_RADIUS + 6}
                   color={theme.accent}
                   style="stroke"
                   strokeWidth={2}
@@ -399,34 +423,57 @@ export default function FloorMap({ snapshot, mode }: Props) {
         <GestureDetector gesture={gesture} touchAction="none">
           <View style={StyleSheet.absoluteFill} collapsable={false} />
         </GestureDetector>
-        <Animated.View
-          pointerEvents="none"
-          style={[styles.callout, { backgroundColor: theme.background }, calloutStyle]}
-        >
-          <ThemedText type="small">{selected?.label ?? ''}</ThemedText>
+        <Glass style={styles.zoom}>
+          <IconButton
+            icon="plus"
+            label="Zoom in"
+            variant="plain"
+            onPress={() => zoomBy(ZOOM_STEP)}
+          />
+          <IconButton
+            icon="minus"
+            label="Zoom out"
+            variant="plain"
+            onPress={() => zoomBy(1 / ZOOM_STEP)}
+          />
+          <IconButton
+            icon="fit"
+            label="Fit path"
+            variant="plain"
+            testID="map-fit"
+            onPress={fitToContent}
+          />
+        </Glass>
+        <Animated.View pointerEvents="none" style={[styles.callout, calloutStyle]}>
+          <Glass style={styles.calloutGlass}>
+            <ThemedText type="smallBold">{selected?.label ?? ''}</ThemedText>
+          </Glass>
         </Animated.View>
+        <View pointerEvents="none" style={styles.footer}>
+          <Glass style={styles.footerGlass}>
+            <ThemedText
+              type="smallBold"
+              testID="map-pin-label"
+              accessibilityLiveRegion="polite"
+              themeColor={selected ? 'text' : 'textSecondary'}
+            >
+              {selected
+                ? selected.label
+                : (summary ??
+                  (placedPins.length > 0 ? 'Tap a pin to see its name' : 'Pinch to zoom'))}
+            </ThemedText>
+          </Glass>
+        </View>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  fill: {
-    flex: 1,
-    width: '100%',
-    gap: Spacing.two,
-  },
-  bar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
   stage: {
     flex: 1,
     width: '100%',
     overflow: 'hidden',
-    borderRadius: Radius.medium,
   },
   origin: {
     transformOrigin: 'left top',
@@ -435,8 +482,34 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     top: 0,
+  },
+  calloutGlass: {
+    paddingVertical: Spacing.one + Spacing.half,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.medium,
+  },
+  fill: {
+    flex: 1,
+    width: '100%',
+    gap: Spacing.two,
+  },
+  zoom: {
+    position: 'absolute',
+    top: Spacing.two,
+    right: 0,
     paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.two,
-    borderRadius: Radius.small,
+    borderRadius: 24,
+  },
+  footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: Spacing.two,
+    alignItems: 'center',
+  },
+  footerGlass: {
+    paddingVertical: Spacing.two + Spacing.half,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.large,
   },
 });

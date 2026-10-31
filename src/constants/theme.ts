@@ -10,25 +10,54 @@ import { Platform } from 'react-native';
 export const Colors = {
   light: {
     text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    textSecondary: '#6C6C70',
+    textTertiary: '#AEAEB2',
+    background: '#F2F2F7',
+    backgroundElement: '#FFFFFF',
+    backgroundSelected: '#E5E5EA',
+    separator: '#D1D1D6',
     accent: '#007AFF',
     onAccent: '#ffffff',
-    danger: '#D70015',
+    danger: '#FF3B30',
+    success: '#34C759',
+    canvas: '#FFFFFF',
+    grid: '#E6E8EE',
+    pathRaw: '#A1A1A8',
+    pathCorrected: '#1C1C1E',
+    glassFill: 'rgba(255, 255, 255, 0.62)',
+    glassBorder: 'rgba(0, 0, 0, 0.08)',
+    glassSelected: 'rgba(0, 0, 0, 0.06)',
   },
   dark: {
     text: '#ffffff',
+    textSecondary: '#98989F',
+    textTertiary: '#5A5A60',
     background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    backgroundElement: '#1C1C1E',
+    backgroundSelected: '#2C2C2E',
+    separator: '#38383A',
     accent: '#0A84FF',
     onAccent: '#ffffff',
     danger: '#FF453A',
+    success: '#30D158',
+    canvas: '#0B0D12',
+    grid: '#1A1D24',
+    pathRaw: '#6E6E76',
+    pathCorrected: '#FFFFFF',
+    glassFill: 'rgba(255, 255, 255, 0.08)',
+    glassBorder: 'rgba(255, 255, 255, 0.14)',
+    glassSelected: 'rgba(255, 255, 255, 0.12)',
   },
 } as const;
+
+/** `#RRGGBB` plus an alpha, for tinted backgrounds such as a red Delete button. */
+export function withAlpha(hex: string, alpha: number): string {
+  const value = hex.replace('#', '');
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
@@ -70,6 +99,8 @@ export const Spacing = {
 export const Radius = {
   small: 8,
   medium: 12,
+  large: 22,
+  card: 24,
 } as const;
 
 export const MaxContentWidth = 800;

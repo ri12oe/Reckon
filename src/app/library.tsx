@@ -1,9 +1,11 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { type ComponentRef, useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppearanceMenu } from '@/components/appearance-menu';
-import { Button } from '@/components/button';
+import { Button, IconButton } from '@/components/button';
+import { FloorCard, THUMBNAIL_SIZE } from '@/components/floor-card';
+import { Icon } from '@/components/icon';
 import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
@@ -14,6 +16,8 @@ import { getActiveFloor, resumeLiveWalk, showSavedFloor } from '@/db/session';
 import { shareStoredFloor } from '@/db/share-floor';
 import { getEngine } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
+import { pathThumbnail, type Thumbnail } from '@/map/thumbnail';
+import { formatDistance, pathLength } from '@/walk/stats';
 
 /** How long a save, load, or delete message stays up. */
 const STATUS_MS = 4000;
@@ -25,6 +29,13 @@ export default function LibraryScreen() {
   const [floorName, setFloorName] = useState('');
   const [floors, setFloors] = useState<FloorSummary[]>([]);
   const [status, setStatus] = useState('');
+  const [details, setDetails] = useState<Record<string, FloorDetail>>({});
+  const [query, setQuery] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(() => getActiveFloor()?.id ?? null);
+  const [current, setCurrent] = useState(() => getEngine().getSnapshot());
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  const buildingRef = useRef<ComponentRef<typeof TextInput>>(null);
   const store = ready ? getFloorStore() : null;
 
   useEffect(() => {
@@ -45,7 +56,20 @@ export default function LibraryScreen() {
   }, [status]);
 
   const reload = useCallback(() => {
-    setFloors(getFloorStore().list());
+    const floorStore = getFloorStore();
+    const list = floorStore.list();
+    const next: Record<string, FloorDetail> = {};
+    for (const item of list) {
+      const path = floorStore.get(item.id)?.snapshot.correctedPath ?? [];
+      next[item.id] = {
+        distance: pathLength(path),
+        thumbnail: pathThumbnail(path, THUMBNAIL_SIZE, 10),
+      };
+    }
+    setFloors(list);
+    setDetails(next);
+    setActiveId(getActiveFloor()?.id ?? null);
+    setCurrent(getEngine().getSnapshot());
   }, []);
 
   useFocusEffect(
@@ -64,7 +88,9 @@ export default function LibraryScreen() {
         snapshot: getEngine().getSnapshot(),
       });
       reload();
-      setStatus(`Saved ${saved.buildingName} / ${saved.name}.`);
+      setBuilding('');
+      setFloorName('');
+      setStatus(`Saved ${saved.buildingName} · ${saved.name}.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not save.');
     }
@@ -79,7 +105,8 @@ export default function LibraryScreen() {
       return;
     }
     showSavedFloor(floor);
-    setStatus(`Loaded ${floor.buildingName} / ${floor.name} into Walk and Map.`);
+    setActiveId(floor.id);
+    setStatus(`Showing ${floor.buildingName} · ${floor.name} on Walk and Map.`);
   };
 
   const share = async (id: string) => {
@@ -99,7 +126,7 @@ export default function LibraryScreen() {
 
   const remove = (id: string) => {
     const floor = floors.find((item) => item.id === id);
-    const label = floor ? `${floor.buildingName} / ${floor.name}` : 'this floor';
+    const label = floor ? `${floor.buildingName} · ${floor.name}` : 'this floor';
     const run = () => {
       if (!store) return;
       store.delete(id);
@@ -117,86 +144,142 @@ export default function LibraryScreen() {
     ]);
   };
 
+  const startNewFloor = () => {
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+    buildingRef.current?.focus();
+  };
+
+  const needle = query.trim().toLowerCase();
+  const shown = needle
+    ? floors.filter((item) => `${item.buildingName} ${item.name}`.toLowerCase().includes(needle))
+    : floors;
+  const count = `${floors.length} saved ${floors.length === 1 ? 'floor' : 'floors'}`;
+  const input = [styles.input, { color: theme.text, backgroundColor: theme.backgroundSelected }];
+
   return (
-    <Screen title="Library" headerRight={<AppearanceMenu />}>
+    <Screen
+      title="Library"
+      subtitle={count}
+      headerRight={
+        <>
+          <AppearanceMenu />
+          <IconButton
+            icon="plus"
+            label="New floor"
+            accessibilityHint="Name the current walk and save it as a floor"
+            onPress={startNewFloor}
+          />
+        </>
+      }
+    >
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
         {store && !store.persistent ? (
-          <ThemedText type="small" themeColor="textSecondary">
+          <ThemedText type="footnote" themeColor="textSecondary">
             SQLite is off in this browser. Floors stay in memory until you reload.
           </ThemedText>
         ) : null}
-        <ThemedText type="smallBold">Save this walk</ThemedText>
-        <TextInput
-          value={building}
-          onChangeText={setBuilding}
-          placeholder="Building name"
-          placeholderTextColor={theme.textSecondary}
-          accessibilityLabel="Building name"
-          style={[styles.input, { color: theme.text, backgroundColor: theme.backgroundElement }]}
-        />
-        <TextInput
-          value={floorName}
-          onChangeText={setFloorName}
-          placeholder="Floor name"
-          placeholderTextColor={theme.textSecondary}
-          accessibilityLabel="Floor name"
-          style={[styles.input, { color: theme.text, backgroundColor: theme.backgroundElement }]}
-        />
-        <Button label="Save current walk" variant="primary" onPress={save} />
+
+        {floors.length > 0 ? (
+          <View style={[styles.search, { backgroundColor: theme.backgroundElement }]}>
+            <Icon name="search" color={theme.textSecondary} size={18} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search buildings and floors"
+              placeholderTextColor={theme.textTertiary}
+              accessibilityLabel="Search saved floors"
+              returnKeyType="search"
+              style={[styles.searchInput, { color: theme.text }]}
+            />
+          </View>
+        ) : null}
+
+        <View style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
+          <View style={styles.cardTitle}>
+            <ThemedText type="headline">Save current walk</ThemedText>
+            <ThemedText type="footnote" themeColor="textSecondary">
+              {current.stepCount} steps · {formatDistance(pathLength(current.correctedPath))}
+            </ThemedText>
+          </View>
+          <View style={styles.fields}>
+            <TextInput
+              ref={buildingRef}
+              value={building}
+              onChangeText={setBuilding}
+              placeholder="Building"
+              placeholderTextColor={theme.textTertiary}
+              accessibilityLabel="Building name"
+              style={input}
+            />
+            <TextInput
+              value={floorName}
+              onChangeText={setFloorName}
+              placeholder="Floor"
+              placeholderTextColor={theme.textTertiary}
+              accessibilityLabel="Floor name"
+              style={input}
+            />
+          </View>
+          <Button
+            label="Save floor"
+            accessibilityLabel="Save current walk"
+            variant="primary"
+            icon="check"
+            onPress={save}
+          />
+        </View>
+
         {status ? (
-          <ThemedText type="small" themeColor="textSecondary" accessibilityLiveRegion="polite">
+          <ThemedText type="footnote" themeColor="textSecondary" accessibilityLiveRegion="polite">
             {status}
           </ThemedText>
         ) : null}
-        <ThemedText type="smallBold" style={styles.section}>
+
+        <ThemedText type="title2" accessibilityRole="header" style={styles.section}>
           Saved floors
         </ThemedText>
         {floors.length === 0 ? (
-          <ThemedText themeColor="textSecondary">No saved floors yet.</ThemedText>
+          <ThemedText themeColor="textSecondary">
+            No saved floors yet. Walk a floor, then save it here.
+          </ThemedText>
+        ) : shown.length === 0 ? (
+          <ThemedText themeColor="textSecondary">No floors match “{query.trim()}”.</ThemedText>
         ) : (
-          floors.map((item) => (
-            <View key={item.id} style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
-              <ThemedText type="smallBold">
-                {item.buildingName} / {item.name}
-              </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                {item.stepCount} steps · {item.pointCount} points · {item.pinCount} pins
-              </ThemedText>
-              <View style={styles.actions}>
-                <Button
-                  label="Load"
-                  accessibilityLabel={`Load ${item.buildingName} ${item.name}`}
-                  compact
-                  onPress={() => load(item.id)}
-                />
-                <Button
-                  label="Share"
-                  accessibilityLabel={`Share ${item.buildingName} ${item.name}`}
-                  compact
-                  onPress={() => {
-                    void share(item.id);
-                  }}
-                />
-                <View style={styles.spacer} />
-                <Button
-                  label="Delete"
-                  accessibilityLabel={`Delete ${item.buildingName} ${item.name}`}
-                  variant="destructive"
-                  compact
-                  onPress={() => remove(item.id)}
-                />
-              </View>
-            </View>
-          ))
+          shown.map((item) => {
+            const detail = details[item.id];
+            const pins = `${item.pinCount} ${item.pinCount === 1 ? 'pin' : 'pins'}`;
+            return (
+              <FloorCard
+                key={item.id}
+                building={item.buildingName}
+                floor={item.name}
+                meta={`${item.stepCount} steps · ${formatDistance(detail?.distance ?? 0)} · ${pins}`}
+                thumbnail={detail?.thumbnail ?? EMPTY_THUMBNAIL}
+                showing={activeId === item.id}
+                expanded={expandedId === item.id}
+                onLoad={() => load(item.id)}
+                onToggleActions={() => setExpandedId((open) => (open === item.id ? null : item.id))}
+                onShare={() => {
+                  void share(item.id);
+                }}
+                onDelete={() => remove(item.id)}
+              />
+            );
+          })
         )}
       </ScrollView>
     </Screen>
   );
 }
+
+type FloorDetail = { distance: number; thumbnail: Thumbnail };
+
+const EMPTY_THUMBNAIL: Thumbnail = { segments: [], start: null };
 
 const styles = StyleSheet.create({
   scroll: {
@@ -206,25 +289,43 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
     paddingBottom: Spacing.five,
   },
-  input: {
-    fontSize: 16,
+  search: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    minHeight: 44,
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
-    borderRadius: Radius.medium,
+    borderRadius: 22,
   },
-  section: {
-    marginTop: Spacing.three,
+  searchInput: {
+    flex: 1,
+    fontSize: 17,
+    paddingVertical: Spacing.two,
   },
   card: {
-    gap: Spacing.two,
+    gap: Spacing.three,
     padding: Spacing.three,
-    borderRadius: Radius.medium,
+    borderRadius: Radius.card,
   },
-  actions: {
+  cardTitle: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  fields: {
     flexDirection: 'row',
     gap: Spacing.two,
   },
-  spacer: {
+  input: {
     flex: 1,
+    minWidth: 0,
+    fontSize: 17,
+    minHeight: 46,
+    paddingHorizontal: Spacing.three,
+    borderRadius: 14,
+  },
+  section: {
+    marginTop: Spacing.two,
   },
 });

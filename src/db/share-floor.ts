@@ -1,6 +1,24 @@
 import { Platform, Share } from 'react-native';
 
 import { floorExportJson, type StoredFloor } from '@/db/floors';
+import type { EngineSnapshot } from '@/engine/types';
+
+/** The walk in progress, shaped like a saved floor so it exports the same JSON. */
+export function liveWalkFloor(snapshot: EngineSnapshot, now = Date.now()): StoredFloor {
+  const stamp = new Date(now).toISOString().slice(0, 16).replace('T', ' ');
+  return {
+    id: 'live',
+    buildingId: 'live',
+    buildingName: 'Live walk',
+    name: stamp,
+    stepCount: snapshot.stepCount,
+    heading: snapshot.heading,
+    pinCount: snapshot.pins.length,
+    pointCount: snapshot.correctedPath.length,
+    createdAt: now,
+    snapshot,
+  };
+}
 
 /** Share one floor as JSON. Web downloads (and copies) because SQLite is off there. */
 export async function shareStoredFloor(floor: StoredFloor): Promise<string> {
