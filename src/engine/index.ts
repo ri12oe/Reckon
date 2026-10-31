@@ -21,3 +21,16 @@ export type {
   StepEvent,
   StepSample,
 } from '@/engine/step-detector';
+
+export {
+  DEFAULT_HEADING_FUSION_CONFIG,
+  fuseHeading,
+  magneticFieldMagnitude,
+  magneticHeadingDeg,
+} from '@/engine/heading-fusion';
+export type {
+  FusedHeading,
+  GyroSample,
+  HeadingFusionConfig,
+  MagSample,
+} from '@/engine/heading-fusion';
