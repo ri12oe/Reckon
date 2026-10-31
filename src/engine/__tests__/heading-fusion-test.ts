@@ -1,4 +1,4 @@
-import { getEngine } from '@/engine';
+import { getEngine, mockEngine } from '@/engine';
 import {
   DEFAULT_HEADING_FUSION_CONFIG,
   fuseHeading,
@@ -401,10 +401,15 @@ describe('fuseHeading', () => {
 });
 
 describe('getEngine', () => {
-  test('still returns the static mock snapshot', () => {
+  test('returns the live engine at the origin; mockEngine keeps the static walk', () => {
     const snapshot = getEngine().getSnapshot();
-    expect(snapshot.heading).toBe(90);
-    expect(snapshot.stepCount).toBe(12);
+    expect(snapshot.heading).toBe(0);
+    expect(snapshot.stepCount).toBe(0);
+    expect(snapshot.rawPath).toEqual([{ x: 0, y: 0, t: 0 }]);
+
+    const mock = mockEngine.getSnapshot();
+    expect(mock.heading).toBe(90);
+    expect(mock.stepCount).toBe(12);
     expect(typeof fuseHeading).toBe('function');
   });
 });

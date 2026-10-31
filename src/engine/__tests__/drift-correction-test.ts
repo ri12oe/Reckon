@@ -5,6 +5,7 @@ import {
   closeLoop,
   correctDrift,
   getEngine,
+  mockEngine,
   nearestCorridorAxis,
   snapCorridor,
 } from '@/engine';
@@ -422,14 +423,20 @@ describe('correctDrift', () => {
 });
 
 describe('getEngine', () => {
-  test('still returns the static mock snapshot', () => {
+  test('returns the live engine at the origin; mockEngine keeps the static walk', () => {
     const snapshot = getEngine().getSnapshot();
-    expect(snapshot.stepCount).toBe(12);
-    expect(snapshot.heading).toBe(90);
-    expect(snapshot.rawPath).toHaveLength(7);
+    expect(snapshot.stepCount).toBe(0);
+    expect(snapshot.heading).toBe(0);
+    expect(snapshot.rawPath).toEqual([{ x: 0, y: 0, t: 0 }]);
     expect(snapshot.correctedPath[0]).toEqual({ x: 0, y: 0, t: 0 });
-    expect(snapshot.correctedPath[1]).toEqual({ x: 1.5, y: 0, t: 1200 });
-    expect(snapshot.pins.map((pin) => pin.id)).toEqual(['door', 'desk']);
+    expect(snapshot.pins).toEqual([]);
+
+    const mock = mockEngine.getSnapshot();
+    expect(mock.stepCount).toBe(12);
+    expect(mock.heading).toBe(90);
+    expect(mock.rawPath).toHaveLength(7);
+    expect(mock.correctedPath[1]).toEqual({ x: 1.5, y: 0, t: 1200 });
+    expect(mock.pins.map((pin) => pin.id)).toEqual(['door', 'desk']);
     expect(typeof snapCorridor).toBe('function');
     expect(typeof closeLoop).toBe('function');
     expect(typeof alignLandmarks).toBe('function');

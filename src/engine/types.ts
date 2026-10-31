@@ -1,6 +1,6 @@
 /**
  * UI-side contract for the dead-reckoning engine.
- * The engine owner implements this. This app only ships a static mock.
+ * `getEngine()` is the live pipeline. `mockEngine` is the static sample walk.
  *
  * Points are meters on the floor plane: x east, y north.
  * t is milliseconds from the start of the walk.
