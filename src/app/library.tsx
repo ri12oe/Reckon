@@ -2,6 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
+import { AppearanceMenu } from '@/components/appearance-menu';
 import { Button } from '@/components/button';
 import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
@@ -117,7 +118,7 @@ export default function LibraryScreen() {
   };
 
   return (
-    <Screen title="Library">
+    <Screen title="Library" headerRight={<AppearanceMenu />}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
