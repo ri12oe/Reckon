@@ -33,7 +33,6 @@ export type SaveFloorInput = {
 };
 
 export type FloorStore = {
-  /** Native SQLite survives restarts. The web stand-in does not. */
   readonly persistent: boolean;
   list(): FloorSummary[];
   save(input: SaveFloorInput): StoredFloor;

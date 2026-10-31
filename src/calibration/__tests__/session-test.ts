@@ -4,6 +4,7 @@ import {
   cancelCalibration,
   leaveCalibration,
   noteSteps,
+  parseCourseMeters,
   stepsTowardCalibration,
   type CalibrationSession,
 } from '@/calibration/session';
@@ -38,6 +39,21 @@ describe('stepsTowardCalibration', () => {
 
   test('a missing baseline falls back to the live count', () => {
     expect(stepsTowardCalibration(Number.NaN, 3)).toBe(3);
+  });
+});
+
+describe('parseCourseMeters', () => {
+  test('a positive length is the course', () => {
+    expect(parseCourseMeters('8')).toBe(8);
+    expect(parseCourseMeters(' 12.5 ')).toBe(12.5);
+  });
+
+  test('blank, zero, and words are not a course', () => {
+    expect(parseCourseMeters('')).toBeNull();
+    expect(parseCourseMeters('   ')).toBeNull();
+    expect(parseCourseMeters('0')).toBeNull();
+    expect(parseCourseMeters('-3')).toBeNull();
+    expect(parseCourseMeters('hallway')).toBeNull();
   });
 });
 

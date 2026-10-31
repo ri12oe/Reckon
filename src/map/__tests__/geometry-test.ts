@@ -2,10 +2,13 @@ import type { EngineSnapshot } from '@/engine';
 import {
   MAX_MAP_SCALE,
   MIN_MAP_SCALE,
+  boundsEqual,
   canvasToStage,
   clampTranslation,
+  fitBoundsFor,
   framePoints,
   hitTestPin,
+  keptFitBounds,
   makeProjector,
   panBaseline,
   panTo,
@@ -14,6 +17,9 @@ import {
   pinchAboutFocal,
   pinchBaseline,
   stageToCanvas,
+  wheelZoomFactor,
+  zoomAt,
+  zoomFocal,
 } from '@/map/geometry';
 
 const snapshot: EngineSnapshot = {
@@ -129,6 +135,104 @@ describe('camera', () => {
     const next = clampTranslation({ x: 10_000, y: -10_000 }, 1, 200, 100, 48);
     expect(next.x).toBe(152);
     expect(next.y).toBe(-52);
+  });
+
+  test('clamped pan keeps the path center on screen', () => {
+    const content = { minX: 400, maxX: 900, minY: 60, maxY: 480 };
+    const width = 1052;
+    const height = 540;
+    const scale = 4;
+    const next = clampTranslation({ x: -200, y: -2000 }, scale, width, height, 48, content);
+    const centerX = ((content.minX + content.maxX) / 2) * scale + next.x;
+    const centerY = ((content.minY + content.maxY) / 2) * scale + next.y;
+    expect(centerX).toBeGreaterThanOrEqual(width * 0.2);
+    expect(centerX).toBeLessThanOrEqual(width * 0.8);
+    expect(centerY).toBeGreaterThanOrEqual(height * 0.2);
+    expect(centerY).toBeLessThanOrEqual(height * 0.8);
+  });
+
+  test('a zoom centered on the path is not pulled away', () => {
+    const content = { minX: 400, maxX: 800, minY: 50, maxY: 450 };
+    const focal = { x: 600, y: 250 };
+    const next = zoomAt({ scale: 1, translateX: 0, translateY: 0 }, focal, 2);
+    const clamped = clampTranslation(
+      { x: next.translateX, y: next.translateY },
+      next.scale,
+      1000,
+      500,
+      48,
+      content,
+    );
+    expect(clamped.x).toBeCloseTo(next.translateX);
+    expect(clamped.y).toBeCloseTo(next.translateY);
+  });
+
+  test('a wheel over empty padding zooms the nearest path point', () => {
+    const points = [
+      { x: 300, y: 400 },
+      { x: 700, y: 400 },
+      { x: 700, y: 80 },
+    ];
+    const camera = { scale: 1, translateX: 0, translateY: 0 };
+    expect(zoomFocal({ x: 40, y: 420 }, camera, points)).toEqual(points[0]);
+    expect(zoomFocal({ x: 310, y: 410 }, camera, points)).toEqual({ x: 310, y: 410 });
+  });
+
+  test('scroll zoom keeps the floor point under the cursor', () => {
+    const current = { scale: 1, translateX: 0, translateY: 0 };
+    const focal = { x: 80, y: 40 };
+    const anchor = stageToCanvas(focal, current.scale, current.translateX, current.translateY);
+    const next = zoomAt(current, focal, wheelZoomFactor(-100));
+    const landed = canvasToStage(anchor, next.scale, next.translateX, next.translateY);
+    expect(next.scale).toBeGreaterThan(1);
+    expect(landed.x).toBeCloseTo(focal.x);
+    expect(landed.y).toBeCloseTo(focal.y);
+    expect(wheelZoomFactor(0)).toBe(1);
+    expect(wheelZoomFactor(100)).toBeLessThan(1);
+  });
+});
+
+describe('fit frame', () => {
+  test('an empty walk still has a frame around the origin', () => {
+    const bounds = fitBoundsFor([]);
+    const place = makeProjector(
+      [
+        { x: bounds.minX, y: bounds.minY },
+        { x: bounds.maxX, y: bounds.maxY },
+      ],
+      200,
+      200,
+      24,
+    );
+    expect(place).not.toBeNull();
+    const origin = place!({ x: 0, y: 0 });
+    expect(origin.x).toBeGreaterThanOrEqual(24);
+    expect(origin.x).toBeLessThanOrEqual(176);
+    expect(origin.y).toBeGreaterThanOrEqual(24);
+    expect(origin.y).toBeLessThanOrEqual(176);
+  });
+
+  test('a grabbed camera keeps its frame when the walk grows', () => {
+    const fitted = { minX: 0, maxX: 4, minY: 0, maxY: 4 };
+    const grown = { minX: 0, maxX: 10, minY: -1, maxY: 4 };
+    expect(keptFitBounds(true, fitted, grown)).toEqual(fitted);
+    expect(keptFitBounds(false, fitted, grown)).toEqual(grown);
+    expect(boundsEqual(fitted, grown)).toBe(false);
+  });
+
+  test('a frozen frame does not move a point when the walk grows', () => {
+    const frame = [
+      { x: 0, y: 0 },
+      { x: 4, y: 4 },
+    ];
+    const place = makeProjector(frame, 200, 200, 24);
+    const grown = makeProjector([...frame, { x: 10, y: 0 }], 200, 200, 24);
+    expect(place).not.toBeNull();
+    expect(grown).not.toBeNull();
+    const origin = place!({ x: 0, y: 0 });
+    const later = place!({ x: 10, y: 0 });
+    expect(grown!({ x: 0, y: 0 })).not.toEqual(origin);
+    expect(later.x).toBeGreaterThan(origin.x);
   });
 });
 

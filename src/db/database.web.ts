@@ -1,7 +1,30 @@
+import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
+
+import { FLOOR_SCHEMA } from '@/db/schema';
+
+let database: SQLiteDatabase | null = null;
+let pending: Promise<SQLiteDatabase | null> | null = null;
+
+export function getDatabase(): SQLiteDatabase | null {
+  return database;
+}
+
 /**
- * Web does not open SQLite in this shell.
- * The library falls back to an in-memory floor list for the browser session.
+ * Needs a secure context and the COOP/COEP headers that expose `SharedArrayBuffer`.
+ * One tab at a time.
  */
-export function getDatabase(): null {
-  return null;
+export function ensureDatabase(): Promise<SQLiteDatabase | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+  if (database) return Promise.resolve(database);
+  pending ??= openDatabaseAsync('floorwalker.db')
+    .then((opened) => {
+      opened.execSync(FLOOR_SCHEMA);
+      database = opened;
+      return opened;
+    })
+    .catch(() => {
+      pending = null;
+      return null;
+    });
+  return pending;
 }
