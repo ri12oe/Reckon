@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Screen } from '@/components/screen';
 import SkiaMap from '@/components/skia-map';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { getActiveFloor, type ActiveFloor } from '@/db/session';
 import { getEngine, type EngineSnapshot } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
@@ -15,6 +15,7 @@ import type { MapPathMode } from '@/map/geometry';
 const POLL_MS = 250;
 
 const modes = ['raw', 'corrected'] as const;
+const labels = { raw: 'Raw', corrected: 'Corrected' } as const;
 
 export default function MapScreen() {
   const theme = useTheme();
@@ -38,35 +39,36 @@ export default function MapScreen() {
   return (
     <Screen title="Map">
       {active ? (
-        <ThemedText>
+        <ThemedText type="smallBold">
           {active.buildingName} / {active.name}
         </ThemedText>
       ) : null}
-      <View style={styles.modes}>
+      <View style={[styles.modes, { backgroundColor: theme.backgroundElement }]}>
         {modes.map((item) => {
           const selected = mode === item;
           return (
             <Pressable
               key={item}
               accessibilityRole="button"
+              accessibilityLabel={`${labels[item]} path`}
               accessibilityState={{ selected }}
               testID={`map-mode-${item}`}
               onPress={() => setMode(item)}
-              style={[
-                styles.mode,
-                {
-                  backgroundColor: selected ? theme.backgroundSelected : theme.backgroundElement,
-                },
-              ]}
+              style={[styles.mode, selected && { backgroundColor: theme.accent }]}
             >
-              <ThemedText type="small">{item}</ThemedText>
+              <ThemedText
+                type="smallBold"
+                style={{ color: selected ? theme.onAccent : theme.textSecondary }}
+              >
+                {labels[item]}
+              </ThemedText>
             </Pressable>
           );
         })}
       </View>
       <ThemedText type="small" themeColor="textSecondary">
         {snapshot.stepCount} steps · {snapshot.correctedPath.length} points · {snapshot.pins.length}{' '}
-        pins · pinch or scroll to zoom, drag to pan
+        pins
       </ThemedText>
       <SkiaMap snapshot={snapshot} mode={mode} />
     </Screen>
@@ -76,10 +78,13 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   modes: {
     flexDirection: 'row',
-    gap: Spacing.two,
+    padding: Spacing.half,
+    borderRadius: Radius.small + Spacing.half,
   },
   mode: {
+    flex: 1,
+    alignItems: 'center',
     paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.small,
   },
 });

@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import {
   GestureDetector,
   useExclusiveGestures,
@@ -19,8 +19,9 @@ import {
 } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
+import { Button } from '@/components/button';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import type { EngineSnapshot } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -335,17 +336,19 @@ export default function FloorMap({ snapshot, mode }: Props) {
           themeColor={selected ? 'text' : 'textSecondary'}
           testID="map-pin-label"
         >
-          {selected ? selected.label : placedPins.length > 0 ? 'tap a pin' : 'no pins'}
+          {selected
+            ? selected.label
+            : placedPins.length > 0
+              ? 'Tap a pin to see its name'
+              : 'Pinch to zoom, drag to pan'}
         </ThemedText>
-        <Pressable
-          accessibilityRole="button"
+        <Button
+          label="Fit"
           accessibilityLabel="Fit path"
           testID="map-fit"
+          compact
           onPress={fitToContent}
-          style={[styles.fit, { backgroundColor: theme.backgroundElement }]}
-        >
-          <ThemedText type="small">fit</ThemedText>
-        </Pressable>
+        />
       </View>
       <View
         ref={stageRef}
@@ -378,14 +381,14 @@ export default function FloorMap({ snapshot, mode }: Props) {
                 />
               ) : null}
               {placedPins.map((pin) => (
-                <Circle key={pin.id} cx={pin.x} cy={pin.y} r={PIN_RADIUS} color={theme.text} />
+                <Circle key={pin.id} cx={pin.x} cy={pin.y} r={PIN_RADIUS} color={theme.accent} />
               ))}
               {selected ? (
                 <Circle
                   cx={selected.x}
                   cy={selected.y}
                   r={PIN_RADIUS + 4}
-                  color={theme.text}
+                  color={theme.accent}
                   style="stroke"
                   strokeWidth={2}
                 />
@@ -419,14 +422,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.two,
   },
-  fit: {
-    paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.three,
-  },
   stage: {
     flex: 1,
     width: '100%',
     overflow: 'hidden',
+    borderRadius: Radius.medium,
   },
   origin: {
     transformOrigin: 'left top',
@@ -437,5 +437,6 @@ const styles = StyleSheet.create({
     top: 0,
     paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.two,
+    borderRadius: Radius.small,
   },
 });

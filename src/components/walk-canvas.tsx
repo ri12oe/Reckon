@@ -78,7 +78,7 @@ export default function WalkCanvas({ snapshot }: { snapshot: EngineSnapshot }) {
             <Path path={corrected} color={theme.text} style="stroke" strokeWidth={3} />
           ) : null}
           {pins.map((pin) => (
-            <Circle key={pin.id} cx={pin.x} cy={pin.y} r={PIN_RADIUS} color={theme.text} />
+            <Circle key={pin.id} cx={pin.x} cy={pin.y} r={PIN_RADIUS} color={theme.accent} />
           ))}
         </Canvas>
       ) : null}

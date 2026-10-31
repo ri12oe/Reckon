@@ -1,10 +1,11 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
+import { Button } from '@/components/button';
 import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { ensureDatabase } from '@/db/database';
 import { getFloorStore } from '@/db/floor-store';
 import type { FloorSummary } from '@/db/floors';
@@ -12,6 +13,9 @@ import { getActiveFloor, resumeLiveWalk, showSavedFloor } from '@/db/session';
 import { shareStoredFloor } from '@/db/share-floor';
 import { getEngine } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
+
+/** How long a save, load, or delete message stays up. */
+const STATUS_MS = 4000;
 
 export default function LibraryScreen() {
   const theme = useTheme();
@@ -32,6 +36,12 @@ export default function LibraryScreen() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!status) return;
+    const timer = setTimeout(() => setStatus(''), STATUS_MS);
+    return () => clearTimeout(timer);
+  }, [status]);
 
   const reload = useCallback(() => {
     setFloors(getFloorStore().list());
@@ -118,6 +128,7 @@ export default function LibraryScreen() {
             SQLite is off in this browser. Floors stay in memory until you reload.
           </ThemedText>
         ) : null}
+        <ThemedText type="smallBold">Save this walk</ThemedText>
         <TextInput
           value={building}
           onChangeText={setBuilding}
@@ -134,53 +145,49 @@ export default function LibraryScreen() {
           accessibilityLabel="Floor name"
           style={[styles.input, { color: theme.text, backgroundColor: theme.backgroundElement }]}
         />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Save current walk"
-          onPress={save}
-          style={[styles.button, { backgroundColor: theme.backgroundElement }]}
-        >
-          <ThemedText>Save current walk</ThemedText>
-        </Pressable>
-        {status ? <ThemedText type="small">{status}</ThemedText> : null}
+        <Button label="Save current walk" variant="primary" onPress={save} />
+        {status ? (
+          <ThemedText type="small" themeColor="textSecondary" accessibilityLiveRegion="polite">
+            {status}
+          </ThemedText>
+        ) : null}
+        <ThemedText type="smallBold" style={styles.section}>
+          Saved floors
+        </ThemedText>
         {floors.length === 0 ? (
-          <ThemedText>No saved floors yet.</ThemedText>
+          <ThemedText themeColor="textSecondary">No saved floors yet.</ThemedText>
         ) : (
           floors.map((item) => (
             <View key={item.id} style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
-              <ThemedText>
+              <ThemedText type="smallBold">
                 {item.buildingName} / {item.name}
               </ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
                 {item.stepCount} steps · {item.pointCount} points · {item.pinCount} pins
               </ThemedText>
               <View style={styles.actions}>
-                <Pressable
-                  accessibilityRole="button"
+                <Button
+                  label="Load"
                   accessibilityLabel={`Load ${item.buildingName} ${item.name}`}
+                  compact
                   onPress={() => load(item.id)}
-                  style={[styles.button, { backgroundColor: theme.backgroundSelected }]}
-                >
-                  <ThemedText>Load</ThemedText>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
+                />
+                <Button
+                  label="Share"
                   accessibilityLabel={`Share ${item.buildingName} ${item.name}`}
+                  compact
                   onPress={() => {
                     void share(item.id);
                   }}
-                  style={[styles.button, { backgroundColor: theme.backgroundSelected }]}
-                >
-                  <ThemedText>Share</ThemedText>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
+                />
+                <View style={styles.spacer} />
+                <Button
+                  label="Delete"
                   accessibilityLabel={`Delete ${item.buildingName} ${item.name}`}
+                  variant="destructive"
+                  compact
                   onPress={() => remove(item.id)}
-                  style={[styles.button, { backgroundColor: theme.backgroundSelected }]}
-                >
-                  <ThemedText>Delete</ThemedText>
-                </Pressable>
+                />
               </View>
             </View>
           ))
@@ -202,19 +209,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
+    borderRadius: Radius.medium,
   },
-  button: {
-    alignItems: 'center',
-    paddingVertical: Spacing.three,
-    paddingHorizontal: Spacing.three,
+  section: {
+    marginTop: Spacing.three,
   },
   card: {
     gap: Spacing.two,
     padding: Spacing.three,
+    borderRadius: Radius.medium,
   },
   actions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: Spacing.two,
+  },
+  spacer: {
+    flex: 1,
   },
 });
