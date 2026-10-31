@@ -42,3 +42,11 @@ export {
   stepOffset,
 } from '@/engine/path-integration';
 export type { HeadingSample, PathIntegrationConfig, PathStep } from '@/engine/path-integration';
+
+export {
+  countCalibrationSteps,
+  estimateStepLength,
+  estimateStepLengthFromSteps,
+  stepLengthOrDefault,
+} from '@/engine/step-length';
+export type { CalibrationWalk, StepLengthEstimate } from '@/engine/step-length';
