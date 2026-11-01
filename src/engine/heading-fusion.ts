@@ -501,6 +501,155 @@ function resolveConfig(config?: Partial<HeadingFusionConfig>): HeadingFusionConf
   };
 }
 
+/**
+ * Incremental fusion. Samples fold into the filter once a later sample has
+ * pushed them out of the holdback, and the raw events are dropped.
+ * `replayPending()` is the open tail a snapshot still has to walk.
+ * An event older than the settled time is dropped: the holdback is the
+ * window in which a late gyro or magnetometer sample can still join.
+ */
+export const FUSION_PENDING_HOLD = 160;
+
+export type HeadingFold = {
+  /** Headings newly settled into the filter, in time order. */
+  headings: FusedHeading[];
+  /** Gyro and magnetometer events applied to the filter. */
+  processed: number;
+};
+
+export type HeadingFusionIngest = {
+  pushGyro(sample: GyroSample): HeadingFold;
+  pushMag(sample: MagSample): HeadingFold;
+  /** Open tail, applied to a copy of the settled filter. */
+  replayPending(): HeadingFold;
+  oldestPendingT(): number | null;
+  pendingCount(): number;
+  latestSettled(): FusedHeading | null;
+  reset(): void;
+};
+
+export function createHeadingFusion(config?: Partial<HeadingFusionConfig>): HeadingFusionIngest {
+  const resolved = resolveConfig(config);
+  let state = createState(resolved.initialHeadingDeg);
+  let pending: TimedEvent[] = [];
+  let settledLatest: FusedHeading | null = null;
+
+  function sortPending(): void {
+    pending.sort((a, b) => a.t - b.t || a.rank - b.rank);
+  }
+
+  function settleExcess(): HeadingFold {
+    if (pending.length <= FUSION_PENDING_HOLD) return { headings: [], processed: 0 };
+    sortPending();
+    const headings: FusedHeading[] = [];
+    let processed = 0;
+    while (pending.length > FUSION_PENDING_HOLD) {
+      const t = pending[0]!.t;
+      let end = 1;
+      while (end < pending.length && pending[end]!.t === t) end += 1;
+      // Leave the newest timestamp open so a sibling sample can still join it.
+      if (end === pending.length) break;
+      const group = pending.splice(0, end);
+      const fused = step(state, t, group, resolved);
+      headings.push(fused);
+      settledLatest = fused;
+      processed += group.length;
+    }
+    return { headings, processed };
+  }
+
+  function pushEvent(event: TimedEvent | null): HeadingFold {
+    if (!event) return { headings: [], processed: 0 };
+    // Settled timestamps are not reopened. A late sibling would have to
+    // replay the filter from before that group, and those events are gone.
+    if (state.lastT !== null && event.t <= state.lastT) return { headings: [], processed: 0 };
+    pending.push(event);
+    return settleExcess();
+  }
+
+  return {
+    pushGyro(sample) {
+      return pushEvent(gyroEvent(sample));
+    },
+    pushMag(sample) {
+      return pushEvent(magEvent(sample));
+    },
+    replayPending() {
+      if (pending.length === 0) return { headings: [], processed: 0 };
+      sortPending();
+      const copy = cloneState(state);
+      const headings: FusedHeading[] = [];
+      let index = 0;
+      while (index < pending.length) {
+        const t = pending[index]!.t;
+        let end = index + 1;
+        while (end < pending.length && pending[end]!.t === t) end += 1;
+        headings.push(step(copy, t, pending.slice(index, end), resolved));
+        index = end;
+      }
+      return { headings, processed: pending.length };
+    },
+    oldestPendingT() {
+      if (pending.length === 0) return null;
+      sortPending();
+      return pending[0]!.t;
+    },
+    pendingCount() {
+      return pending.length;
+    },
+    latestSettled() {
+      return settledLatest;
+    },
+    reset() {
+      state = createState(resolved.initialHeadingDeg);
+      pending = [];
+      settledLatest = null;
+    },
+  };
+}
+
+function gyroEvent(sample: GyroSample): TimedEvent | null {
+  if (!Number.isFinite(sample.t)) return null;
+  if ('brake' in sample) return { t: sample.t, rank: 0, kind: 'brake' };
+  if (!Number.isFinite(sample.yawRate)) return null;
+  return { t: sample.t, rank: 0, kind: 'measured', yawRate: sample.yawRate };
+}
+
+function magEvent(sample: MagSample): TimedEvent | null {
+  if (
+    !Number.isFinite(sample.t) ||
+    !Number.isFinite(sample.x) ||
+    !Number.isFinite(sample.y) ||
+    !Number.isFinite(sample.z)
+  ) {
+    return null;
+  }
+  return { t: sample.t, rank: 1, x: sample.x, y: sample.y, z: sample.z };
+}
+
+function cloneState(state: FusionState): FusionState {
+  return {
+    heading: state.heading,
+    yaw:
+      state.yaw.kind === 'brake'
+        ? { kind: 'brake' }
+        : { kind: 'measured', degPerSec: state.yaw.degPerSec },
+    biasDegPerSec: state.biasDegPerSec,
+    rawYawAccumDeg: state.rawYawAccumDeg,
+    lastT: state.lastT,
+    phase: { kind: state.phase.kind },
+    baselineUt: state.baselineUt,
+    lastMagHeading: state.lastMagHeading,
+    headingMark: state.headingMark,
+    lastTrustedT: state.lastTrustedT,
+    recentMag: state.recentMag.map((obs) => ({
+      t: obs.t,
+      magnitudeUt: obs.magnitudeUt,
+      headingDeg: obs.headingDeg,
+    })),
+  };
+}
+
 function finiteOr(value: number | undefined, fallback: number): number {
   return value === undefined || !Number.isFinite(value) ? fallback : value;
 }
