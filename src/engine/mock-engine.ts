@@ -33,7 +33,6 @@ export const mockEngine: FloorwalkerEngine = {
   },
 };
 
-/** A walk with no samples. Save and export use this in place of the canned demo. */
 export function emptyRecording(): EngineSnapshot {
   return {
     rawPath: [{ x: 0, y: 0, t: 0 }],
@@ -44,7 +43,6 @@ export function emptyRecording(): EngineSnapshot {
   };
 }
 
-/** True when `snapshot` is the static demo, not a recorded walk. */
 export function isCannedDemo(snapshot: EngineSnapshot): boolean {
   return sameSnapshot(snapshot, mockEngine.getSnapshot());
 }

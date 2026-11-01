@@ -6,9 +6,7 @@
  * heading is degrees clockwise from north.
  *
  * `getEngine()` is the live pipeline. Until that shared engine accepts a
- * sample it still serves the static demo snapshot for display.
- * `snapshotForSave` is the recording, and it is empty during that demo.
- * `mockEngine` stays exported.
+ * sample it still serves the static demo snapshot. `mockEngine` stays exported.
  */
 
 export type PathPoint = {

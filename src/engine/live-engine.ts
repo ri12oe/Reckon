@@ -17,9 +17,7 @@
  *
  * `emptySnapshot`, when set, is what `getSnapshot` returns until the first
  * finite accel, gyro, mag, step, or heading sample. `reset()` arms it again.
- * The shared engine uses that for the static demo walk. `snapshotForSave`
- * does not. While that picture is still the demo, a save gets an empty
- * recording.
+ * The shared engine uses that for the static demo walk.
  * `EngineSnapshot.heading` is the course: the latest fused heading, else
  * the latest pushed heading, else the latest step heading, else the
  * configured initial heading (0°).
@@ -120,18 +118,9 @@ export type LiveFloorwalkerEngine = FloorwalkerEngine & {
   recallSnapshot(snapshot: EngineSnapshot): void;
   clearRecall(): void;
   isRecalled(): boolean;
-  /**
-   * The walk a save or export may persist. The canned demo picture is an
-   * empty recording. A live or recalled walk is `getSnapshot`.
-   */
   snapshotForSave(): EngineSnapshot;
   reset(): void;
   getStepLength(): number;
-  /**
-   * True while this engine owns the motion feed, including a start that
-   * has not resolved. One feed per engine. The caller that starts it is
-   * the one that stops it. Map and Library only read snapshots.
-   */
   sensorsActive(): boolean;
   startSensors(options?: StartSensorFeedOptions): Promise<void>;
   stopSensors(): void;

@@ -13,10 +13,7 @@
  *   `SensorManager.GRAVITY_EARTH` before the event is delivered.
  * - gyroscope: radians per second
  * - magnetometer: microtesla
- * - `timestamp`: seconds in the SDK 58 contract. The feed writes one
- *   millisecond clock. A stream whose first gap is already milliseconds
- *   stays in milliseconds, and a missing timestamp stays on that same line
- *   instead of jumping to `Date.now`.
+ * - `timestamp`: seconds.
  *
  * Device axes (Android sensor coordinates and the iOS device frame):
  * +x to the right, +y toward the top of the device, +z out of the screen.
@@ -67,10 +64,7 @@ export type SensorMeasurement = {
   x: number;
   y: number;
   z: number;
-  /**
-   * Expo's documented unit is seconds. A gap of 2 or more between the first
-   * two stamps is treated as milliseconds. Omitted or non-finite uses `nowMs`.
-   */
+  /** Expo's documented unit is seconds. */
   timestamp?: number;
 };
 
@@ -311,12 +305,6 @@ function platformAccelAtRest(): AccelAtRest {
 
 type ReadTime = (measurement: SensorMeasurement) => number | null;
 
-/**
- * First device gap that is too wide to be Expo's second clock at the rates
- * this feed uses. 50 Hz in seconds is ~0.02. 50 Hz in milliseconds is ~20.
- * A 1 s gyro span (gap 1) stays in seconds. A seconds-clock stall of 2 s
- * or more before the second stamp is read as milliseconds.
- */
 const MS_CLOCK_GAP = 2;
 
 function createSensorClock(nowMs: () => number): ReadTime {
