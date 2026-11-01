@@ -98,6 +98,7 @@ describe('heading fusion defaults', () => {
       recoverHoldMs: 400,
       initialHeadingDeg: 0,
       baselineTauSeconds: 10,
+      biasTauSeconds: 5,
     });
   });
 });
@@ -293,7 +294,7 @@ describe('fuseHeading', () => {
     expect(at(fused, 4000).interference).toBe(false);
   });
 
-  test('3.0°/s for 10.0 s: no mag or 200 µT ends at 30.0°; a healthy field ends at 4.46°', () => {
+  test('3.0°/s for 10.0 s: no mag or 200 µT ends at 30.0°; a healthy field ends near 0.86°', () => {
     const times = clock(0, 10000);
     const gyro = gyroAt(times, 3);
     const gyroOnly = fuseHeading(gyro, []);
@@ -322,11 +323,11 @@ describe('fuseHeading', () => {
       gyroOnly: false,
       magnitudeUt: 50,
     });
-    expect(at(corrected, 10000).heading).toBeCloseTo(4.46438, 5);
+    expect(at(corrected, 10000).heading).toBeCloseTo(0.8578, 3);
     expect(at(corrected, 10000)).toMatchObject({ interference: false, gyroOnly: false });
   });
 
-  test('magnetometer at 10 Hz still bounds the same 3.0°/s bias, to 4.35° at 10.0 s', () => {
+  test('magnetometer at 10 Hz still bounds the same 3.0°/s bias, near 0.84° at 10.0 s', () => {
     const gyroTimes = clock(0, 10000, 20);
     const magTimes = clock(0, 10000, 100);
     const fused = fuseHeading(gyroAt(gyroTimes, 3), magAt(magTimes, north()));
@@ -341,7 +342,7 @@ describe('fuseHeading', () => {
       gyroOnly: false,
       interference: false,
     });
-    expect(at(fused, 10000).heading).toBeCloseTo(4.34613, 4);
+    expect(at(fused, 10000).heading).toBeCloseTo(0.8419, 3);
     expect(at(fused, 10000).magneticHeading).toBe(0);
   });
 

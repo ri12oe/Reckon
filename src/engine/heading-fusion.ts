@@ -98,6 +98,8 @@ export type HeadingFusionConfig = {
   initialHeadingDeg: number;
   /** Time constant for the trusted magnitude baseline, seconds. */
   baselineTauSeconds: number;
+  /** Low-pass time constant for gyro bias, seconds. */
+  biasTauSeconds: number;
 };
 
 export const DEFAULT_HEADING_FUSION_CONFIG: HeadingFusionConfig = {
@@ -111,6 +113,7 @@ export const DEFAULT_HEADING_FUSION_CONFIG: HeadingFusionConfig = {
   recoverHoldMs: 400,
   initialHeadingDeg: 0,
   baselineTauSeconds: 10,
+  biasTauSeconds: 5,
 };
 
 /** |B| in microtesla. */
@@ -165,6 +168,10 @@ type MagObs = {
 type FusionState = {
   heading: number;
   yawDegPerSec: number;
+  /** Clockwise degrees per second subtracted from a measured yaw rate. */
+  biasDegPerSec: number;
+  /** Raw degrees integrated since the last live correction. Discarded on latch. */
+  rawYawAccumDeg: number;
   lastT: number | null;
   phase: Phase;
   baselineUt: number | null;
@@ -180,6 +187,8 @@ function createState(initialHeadingDeg: number): FusionState {
   return {
     heading,
     yawDegPerSec: 0,
+    biasDegPerSec: 0,
+    rawYawAccumDeg: 0,
     lastT: null,
     phase: { kind: 'open' },
     baselineUt: null,
@@ -222,7 +231,8 @@ function step(
 ): FusedHeading {
   if (state.lastT !== null && t > state.lastT) {
     const dtSeconds = (t - state.lastT) / 1000;
-    state.heading = wrap360(state.heading + state.yawDegPerSec * dtSeconds);
+    state.heading = wrap360(state.heading + (state.yawDegPerSec - state.biasDegPerSec) * dtSeconds);
+    if (state.phase.kind === 'live') state.rawYawAccumDeg += state.yawDegPerSec * dtSeconds;
   }
   state.lastT = t;
 
@@ -290,7 +300,9 @@ function applyMagnetometer(
   }
 
   if (recoveryReady(state.recentMag, state.baselineUt, config)) {
+    const wasLive = state.phase.kind === 'live';
     state.phase = { kind: 'live' };
+    if (wasLive) learnBias(state, t, magneticHeading, config);
     const innovation = wrap180(magneticHeading - state.heading);
     correct(state, t, magneticHeading, magnitudeUt, innovation, config);
     return { magneticHeading, magnitudeUt };
@@ -302,11 +314,15 @@ function applyMagnetometer(
   const disagrees = innovationAbs > config.reacquireMaxDeg;
 
   if (magnitudeBad || sudden || disagrees) {
-    if (state.phase.kind === 'live') state.phase = { kind: 'held' };
+    if (state.phase.kind === 'live') {
+      state.phase = { kind: 'held' };
+      state.rawYawAccumDeg = 0;
+    }
     return { magneticHeading, magnitudeUt };
   }
 
   if (state.phase.kind === 'live') {
+    learnBias(state, t, magneticHeading, config);
     correct(state, t, magneticHeading, magnitudeUt, innovation, config);
   }
 
@@ -339,6 +355,7 @@ function acquire(
 ): void {
   state.heading = magneticHeading;
   state.phase = { kind: 'live' };
+  state.rawYawAccumDeg = 0;
   state.baselineUt = magnitudeUt;
   state.lastMagHeading = magneticHeading;
   state.headingMark = magneticHeading;
@@ -376,12 +393,36 @@ function isJump(state: FusionState, magneticHeading: number, config: HeadingFusi
   return Math.abs(wrap180(magDelta - gyroDelta)) > config.jumpThresholdDeg;
 }
 
+/** Faster compass motion is a step or a wobble, not a bias sample. Degrees per second. */
+const MAX_BIAS_COMPASS_RATE_DEG_PER_SEC = 30;
+
 function latch(state: FusionState): void {
   if (state.phase.kind === 'live' || state.phase.kind === 'held') {
     state.phase = { kind: 'held' };
+    state.rawYawAccumDeg = 0;
     return;
   }
   state.phase = { kind: 'rejected' };
+}
+
+function learnBias(
+  state: FusionState,
+  t: number,
+  magneticHeading: number,
+  config: HeadingFusionConfig,
+): void {
+  if (state.lastTrustedT === null || state.lastMagHeading === null) return;
+  const dt = (t - state.lastTrustedT) / 1000;
+  if (!(dt > 0)) return;
+  const compassDelta = wrap180(magneticHeading - state.lastMagHeading);
+  if (Math.abs(compassDelta) / dt > MAX_BIAS_COMPASS_RATE_DEG_PER_SEC) {
+    state.rawYawAccumDeg = 0;
+    return;
+  }
+  const compassRate = compassDelta / dt;
+  const biasObs = state.rawYawAccumDeg / dt - compassRate;
+  state.biasDegPerSec += blendAlpha(dt, config.biasTauSeconds) * (biasObs - state.biasDegPerSec);
+  state.rawYawAccumDeg = 0;
 }
 
 function magnitudeIsBad(
@@ -432,6 +473,7 @@ function resolveConfig(config?: Partial<HeadingFusionConfig>): HeadingFusionConf
     recoverHoldMs: nonNegative(config?.recoverHoldMs, defaults.recoverHoldMs),
     initialHeadingDeg: wrap360(finiteOr(config?.initialHeadingDeg, defaults.initialHeadingDeg)),
     baselineTauSeconds: positive(config?.baselineTauSeconds, defaults.baselineTauSeconds),
+    biasTauSeconds: positive(config?.biasTauSeconds, defaults.biasTauSeconds),
   };
 }
 
