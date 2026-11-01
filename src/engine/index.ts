@@ -10,8 +10,16 @@ import type { StartSensorFeedOptions } from '@/engine/sensor-feed';
 /**
  * Process-wide live engine. `startSensors` / `stopSensors` subscribe it.
  * Until the first finite sample, `getSnapshot` is the static demo from
- * `mockEngine`, which stays exported. Tests build an isolated engine
- * with `createLiveEngine()`.
+ * `mockEngine`, which stays exported. `snapshotForSave` is the empty
+ * recording until a real sample or a recalled floor replaces that picture.
+ * Tests build an isolated engine with `createLiveEngine()`.
+ *
+ * One feed. The screen that calls `startSensors` owns `stopSensors`.
+ * Walk does that on focus and blur. Map and Library only read the
+ * snapshot, so they must not stop the feed. Calibration borrows the same
+ * feed for its own walk, and only while Walk is not the focused owner.
+ * A second `startSensors` does nothing while the feed is up. `stopSensors`
+ * always releases it.
  */
 const liveEngine = createLiveEngine({ emptySnapshot: mockEngine.getSnapshot() });
 
@@ -97,7 +105,7 @@ export type {
   LandmarkTag,
 } from '@/engine/drift-correction';
 
-export { mockEngine } from '@/engine/mock-engine';
+export { emptyRecording, isCannedDemo, mockEngine } from '@/engine/mock-engine';
 
 export {
   FLAT_SCREEN_UP_DOWN,

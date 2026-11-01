@@ -539,6 +539,7 @@ describe('getEngine', () => {
     expect(engine).not.toBe(mockEngine);
     expect(typeof engine.startSensors).toBe('function');
     expect(typeof engine.stopSensors).toBe('function');
+    expect(engine.sensorsActive()).toBe(false);
     expect(engine.getSnapshot()).toEqual(mockEngine.getSnapshot());
     expect(engine.getSnapshot()).not.toBe(mockEngine.getSnapshot());
     expect(mockEngine.getSnapshot().stepCount).toBe(12);
@@ -550,12 +551,22 @@ describe('getEngine', () => {
 
   test('startSensors and stopSensors follow getEngine and leave the demo untouched', async () => {
     const sensors = motionSensors();
+    expect(getEngine().sensorsActive()).toBe(false);
     await startSensors({ sensors });
+    expect(getEngine().sensorsActive()).toBe(true);
     expect(sensors.Accelerometer.addListener).toHaveBeenCalledTimes(1);
     expect(getEngine().getSnapshot()).toEqual(mockEngine.getSnapshot());
+    expect(getEngine().snapshotForSave()).toEqual({
+      rawPath: [{ x: 0, y: 0, t: 0 }],
+      correctedPath: [{ x: 0, y: 0, t: 0 }],
+      stepCount: 0,
+      heading: 0,
+      pins: [],
+    });
     expect(getEngine().getSnapshot().stepCount).toBe(12);
 
     stopSensors();
+    expect(getEngine().sensorsActive()).toBe(false);
     const remove = sensors.Accelerometer.addListener.mock.results[0]!.value.remove as jest.Mock;
     expect(remove).toHaveBeenCalledTimes(1);
     sensors.Accelerometer.emit({ x: 0, y: 0, z: 2, timestamp: 1 });

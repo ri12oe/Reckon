@@ -13,8 +13,10 @@
  *   `SensorManager.GRAVITY_EARTH` before the event is delivered.
  * - gyroscope: radians per second
  * - magnetometer: microtesla
- * - `timestamp`: seconds. The engine clock is milliseconds, so timestamps
- *   are rounded to the nearest millisecond.
+ * - `timestamp`: seconds in the SDK 58 contract. The feed writes one
+ *   millisecond clock. A stream whose first gap is already milliseconds
+ *   stays in milliseconds, and a missing timestamp stays on that same line
+ *   instead of jumping to `Date.now`.
  *
  * Device axes (Android sensor coordinates and the iOS device frame):
  * +x to the right, +y toward the top of the device, +z out of the screen.
@@ -65,7 +67,10 @@ export type SensorMeasurement = {
   x: number;
   y: number;
   z: number;
-  /** Seconds, the Expo sensor clock. Omitted or non-finite falls back to `nowMs`. */
+  /**
+   * Expo's documented unit is seconds. A gap of 2 or more between the first
+   * two stamps is treated as milliseconds. Omitted or non-finite uses `nowMs`.
+   */
   timestamp?: number;
 };
 
@@ -149,7 +154,7 @@ export async function startSensorFeed(
 ): Promise<SensorFeed> {
   const sensors = options?.sensors ?? loadExpoMotionSensors();
   const intervalMs = resolveInterval(options?.updateIntervalMs);
-  const nowMs = options?.nowMs ?? (() => Date.now());
+  const readTime = createSensorClock(options?.nowMs ?? (() => Date.now()));
   const state: FeedState = { stopped: false, subscriptions: [] };
   const attitude = createAttitudeTracker(resolveAccelAtRest(options?.accelAtRest));
 
@@ -163,17 +168,17 @@ export async function startSensorFeed(
   };
 
   await subscribe(sensors.Accelerometer, intervalMs, state, (measurement) => {
-    const observed = observeAccel(attitude, measurement, nowMs);
+    const observed = observeAccel(attitude, measurement, readTime);
     if (!observed) return;
     if (observed.hold) sink.pushGyro(observed.hold);
     if (observed.accel) sink.pushAccel(observed.accel);
   });
   await subscribe(sensors.Gyroscope, intervalMs, state, (measurement) => {
-    const sample = gyroFromDevice(attitude, measurement, nowMs);
+    const sample = gyroFromDevice(attitude, measurement, readTime);
     if (sample) sink.pushGyro(sample);
   });
   await subscribe(sensors.Magnetometer, intervalMs, state, (measurement) => {
-    const sample = magFromDevice(attitude, measurement, nowMs);
+    const sample = magFromDevice(attitude, measurement, readTime);
     if (sample) sink.pushMag(sample);
   });
 
@@ -218,10 +223,11 @@ function createAttitudeTracker(atRest: AccelAtRest): AttitudeTracker {
 function observeAccel(
   tracker: AttitudeTracker,
   measurement: SensorMeasurement,
-  nowMs: () => number,
+  readTime: ReadTime,
 ): { accel: AccelSample | null; hold: GyroSample | null } | null {
-  const t = timeMs(measurement, nowMs);
-  if (t === null || !finiteAxes(measurement)) return null;
+  if (!finiteAxes(measurement)) return null;
+  const t = readTime(measurement);
+  if (t === null) return null;
 
   const reading = { x: measurement.x, y: measurement.y, z: measurement.z };
   const dt = tracker.gravityT === null ? Number.POSITIVE_INFINITY : (t - tracker.gravityT) / 1000;
@@ -267,10 +273,11 @@ function accelFromDevice(measurement: SensorMeasurement, t: number): AccelSample
 function gyroFromDevice(
   tracker: AttitudeTracker,
   measurement: SensorMeasurement,
-  nowMs: () => number,
+  readTime: ReadTime,
 ): GyroSample | null {
-  const t = timeMs(measurement, nowMs);
-  if (t === null || !finiteAxes(measurement) || !tracker.level) return null;
+  if (!finiteAxes(measurement) || !tracker.level) return null;
+  const t = readTime(measurement);
+  if (t === null) return null;
   const yawRate = yawAboutDown(measurement, tracker.down ?? FLAT_SCREEN_UP_DOWN);
   if (yawRate === null || !Number.isFinite(yawRate)) return null;
   return { t, yawRate };
@@ -279,10 +286,11 @@ function gyroFromDevice(
 function magFromDevice(
   tracker: AttitudeTracker,
   measurement: SensorMeasurement,
-  nowMs: () => number,
+  readTime: ReadTime,
 ): MagSample | null {
-  const t = timeMs(measurement, nowMs);
-  if (t === null || !finiteAxes(measurement) || !tracker.level) return null;
+  if (!finiteAxes(measurement) || !tracker.level) return null;
+  const t = readTime(measurement);
+  if (t === null) return null;
   const leveled = levelMagnetometer(measurement, tracker.down ?? FLAT_SCREEN_UP_DOWN);
   if (!leveled) return null;
   return { t, x: leveled.x, y: leveled.y, z: leveled.z };
@@ -301,10 +309,81 @@ function platformAccelAtRest(): AccelAtRest {
   return Platform.OS === 'android' ? 'up' : 'down';
 }
 
-function timeMs(measurement: SensorMeasurement, nowMs: () => number): number | null {
-  if (Number.isFinite(measurement.timestamp)) return Math.round(measurement.timestamp! * 1000);
-  const now = nowMs();
-  return Number.isFinite(now) ? Math.round(now) : null;
+type ReadTime = (measurement: SensorMeasurement) => number | null;
+
+/**
+ * First device gap that is too wide to be Expo's second clock at the rates
+ * this feed uses. 50 Hz in seconds is ~0.02. 50 Hz in milliseconds is ~20.
+ * A 1 s gyro span (gap 1) stays in seconds. A seconds-clock stall of 2 s
+ * or more before the second stamp is read as milliseconds.
+ */
+const MS_CLOCK_GAP = 2;
+
+function createSensorClock(nowMs: () => number): ReadTime {
+  let unit: 's' | 'ms' | null = null;
+  let originDevice: number | null = null;
+  let originOut: number | null = null;
+  let lastOut: number | null = null;
+  let lastWall: number | null = null;
+  let anchoredToWall = false;
+
+  const wall = (): number | null => {
+    const now = nowMs();
+    return Number.isFinite(now) ? now : null;
+  };
+
+  return (measurement) => {
+    const now = wall();
+    const device = measurement.timestamp;
+    if (typeof device !== 'number' || !Number.isFinite(device)) {
+      if (now === null) return null;
+      if (lastOut === null || lastWall === null) {
+        if (lastOut !== null) {
+          lastWall = now;
+          return lastOut;
+        }
+        lastWall = now;
+        lastOut = Math.round(now);
+        anchoredToWall = true;
+        return lastOut;
+      }
+      const next = Math.round(lastOut + (now - lastWall));
+      lastWall = now;
+      lastOut = next;
+      return next;
+    }
+
+    const stamp = device;
+    if (originDevice === null) {
+      originDevice = stamp;
+      if (anchoredToWall && lastOut !== null && lastWall !== null && now !== null) {
+        originOut = Math.round(lastOut + (now - lastWall));
+        lastOut = originOut;
+      } else if (anchoredToWall && lastOut !== null) {
+        originOut = lastOut;
+      } else {
+        originOut = Math.round(stamp * 1000);
+        lastOut = originOut;
+      }
+      if (now !== null) lastWall = now;
+      return lastOut;
+    }
+
+    if (unit === null) unit = Math.abs(stamp - originDevice) >= MS_CLOCK_GAP ? 'ms' : 's';
+
+    let next: number;
+    if (unit === 's' && !anchoredToWall) {
+      next = Math.round(stamp * 1000);
+    } else if (unit === 'ms' && !anchoredToWall) {
+      next = Math.round(Math.round(originDevice * 1000) + (stamp - originDevice));
+    } else {
+      const scale = unit === 'ms' ? 1 : 1000;
+      next = Math.round((originOut ?? 0) + (stamp - originDevice) * scale);
+    }
+    lastOut = next;
+    if (now !== null) lastWall = now;
+    return next;
+  };
 }
 
 function finiteAxes(measurement: SensorMeasurement): boolean {

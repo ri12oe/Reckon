@@ -1,4 +1,4 @@
-import type { EngineSnapshot, FloorwalkerEngine } from '@/engine/types';
+import type { EngineSnapshot, FloorwalkerEngine, PathPoint, Pin } from '@/engine/types';
 
 const snapshot: EngineSnapshot = {
   rawPath: [
@@ -32,3 +32,45 @@ export const mockEngine: FloorwalkerEngine = {
     return snapshot;
   },
 };
+
+/** A walk with no samples. Save and export use this in place of the canned demo. */
+export function emptyRecording(): EngineSnapshot {
+  return {
+    rawPath: [{ x: 0, y: 0, t: 0 }],
+    correctedPath: [{ x: 0, y: 0, t: 0 }],
+    stepCount: 0,
+    heading: 0,
+    pins: [],
+  };
+}
+
+/** True when `snapshot` is the static demo, not a recorded walk. */
+export function isCannedDemo(snapshot: EngineSnapshot): boolean {
+  return sameSnapshot(snapshot, mockEngine.getSnapshot());
+}
+
+function sameSnapshot(a: EngineSnapshot, b: EngineSnapshot): boolean {
+  if (a.stepCount !== b.stepCount || a.heading !== b.heading) return false;
+  if (a.rawPath.length !== b.rawPath.length || a.correctedPath.length !== b.correctedPath.length) {
+    return false;
+  }
+  if (a.pins.length !== b.pins.length) return false;
+  for (let i = 0; i < a.rawPath.length; i += 1) {
+    if (!samePoint(a.rawPath[i]!, b.rawPath[i]!)) return false;
+  }
+  for (let i = 0; i < a.correctedPath.length; i += 1) {
+    if (!samePoint(a.correctedPath[i]!, b.correctedPath[i]!)) return false;
+  }
+  for (let i = 0; i < a.pins.length; i += 1) {
+    if (!samePin(a.pins[i]!, b.pins[i]!)) return false;
+  }
+  return true;
+}
+
+function samePoint(a: PathPoint, b: PathPoint): boolean {
+  return a.x === b.x && a.y === b.y && a.t === b.t;
+}
+
+function samePin(a: Pin, b: Pin): boolean {
+  return a.id === b.id && a.label === b.label && a.x === b.x && a.y === b.y;
+}

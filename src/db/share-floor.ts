@@ -1,22 +1,24 @@
 import { Platform, Share } from 'react-native';
 
 import { floorExportJson, type StoredFloor } from '@/db/floors';
+import { emptyRecording, isCannedDemo } from '@/engine/mock-engine';
 import type { EngineSnapshot } from '@/engine/types';
 
 /** The walk in progress, shaped like a saved floor so it exports the same JSON. */
 export function liveWalkFloor(snapshot: EngineSnapshot, now = Date.now()): StoredFloor {
+  const walk = isCannedDemo(snapshot) ? emptyRecording() : snapshot;
   const stamp = new Date(now).toISOString().slice(0, 16).replace('T', ' ');
   return {
     id: 'live',
     buildingId: 'live',
     buildingName: 'Live walk',
     name: stamp,
-    stepCount: snapshot.stepCount,
-    heading: snapshot.heading,
-    pinCount: snapshot.pins.length,
-    pointCount: snapshot.correctedPath.length,
+    stepCount: walk.stepCount,
+    heading: walk.heading,
+    pinCount: walk.pins.length,
+    pointCount: walk.correctedPath.length,
     createdAt: now,
-    snapshot,
+    snapshot: walk,
   };
 }
 
