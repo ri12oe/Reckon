@@ -15,6 +15,12 @@
  * the explicit step list and accelerometer peaks are not counted until
  * `reset()`. A step's own heading displaces that step.
  *
+ * Gyroscope, magnetometer, and accelerometer samples fold in as they
+ * arrive. A snapshot replays the unsettled tail, not the walk so far.
+ * Once a step's heading can no longer change, that heading stays on the
+ * step and the raw samples behind it are dropped. The tail is capped, so
+ * a long walk does not keep every IMU sample.
+ *
  * `emptySnapshot`, when set, is what `getSnapshot` returns until the first
  * finite accel, gyro, mag, step, or heading sample. `reset()` arms it again.
  * The shared engine uses that for the static demo walk.
@@ -37,7 +43,7 @@ import {
   type LandmarkTag,
 } from '@/engine/drift-correction';
 import {
-  fuseHeading,
+  createHeadingFusion,
   type FusedHeading,
   type GyroSample,
   type HeadingFusionConfig,
@@ -55,7 +61,11 @@ import {
   type SensorFeed,
   type StartSensorFeedOptions,
 } from '@/engine/sensor-feed';
-import { detectSteps, type StepDetectorConfig, type StepSample } from '@/engine/step-detector';
+import {
+  createStepAccumulator,
+  type StepDetectorConfig,
+  type StepSample,
+} from '@/engine/step-detector';
 import {
   countCalibrationSteps,
   estimateStepLength,
@@ -95,6 +105,17 @@ export type LandmarkPin = {
   label?: string;
 };
 
+/** Settled fused headings kept for steps that are not yet baked. */
+export const HEADING_SAMPLE_CAP = 512;
+
+export type IngestStats = {
+  /** IMU samples folded or replayed for the last recomputed snapshot. */
+  examined: number;
+  accelRetained: number;
+  fusionPending: number;
+  headingRetained: number;
+};
+
 export type LiveFloorwalkerEngine = FloorwalkerEngine & {
   pushAccel(sample: StepSample): void;
   pushGyro(sample: GyroSample): void;
@@ -125,6 +146,8 @@ export type LiveFloorwalkerEngine = FloorwalkerEngine & {
   sensorsActive(): boolean;
   startSensors(options?: StartSensorFeedOptions): Promise<void>;
   stopSensors(): void;
+  /** Retained IMU, and how many samples the last snapshot walked. */
+  bufferStats(): IngestStats;
 };
 
 type PinRecord = Pin & { anchored: boolean };
@@ -152,9 +175,11 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   const initialDrift = seedDrift(config?.drift);
   const emptySnapshot = config?.emptySnapshot;
 
-  const accels: StepSample[] = [];
-  const gyros: GyroSample[] = [];
-  const mags: MagSample[] = [];
+  const stepsAcc = createStepAccumulator(stepDetectorConfig);
+  const fusion = createHeadingFusion(headingFusionConfig);
+  const fusedHeadings: HeadingSample[] = [];
+  /** Detected steps whose heading is finished. Parallel to the committed prefix. */
+  const baked: PathStep[] = [];
   const explicitSteps: PathStep[] = [];
   const headingSamples: HeadingSample[] = [];
   let stepLengthM = initialLength;
@@ -165,6 +190,8 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   let feed: SensorFeed | null = null;
   let starting: Promise<void> | null = null;
   let generation = 0;
+  let examined = 0;
+  let lastExamined = 0;
 
   const touch = () => {
     cached = null;
@@ -174,21 +201,27 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     if (explicitSteps.some((step) => Number.isFinite(step.t))) {
       return explicitSteps.map(copyPathStep);
     }
-    return detectSteps(accels, stepDetectorConfig).map((step) => ({ t: step.t }));
+    const detected = stepsAcc.steps();
+    examined += stepsAcc.takeExamined();
+    if (!stepsAcc.prefixStable()) return detected.map((step) => ({ t: step.t }));
+    return detected.map((step, index) => {
+      const settled = baked[index];
+      if (settled && settled.t === step.t) return { t: step.t, heading: settled.heading };
+      return { t: step.t };
+    });
   }
 
   function headingCourse(): Course {
-    if (gyros.length > 0 || mags.length > 0) {
-      const fused = fuseHeading(gyros, mags, headingFusionConfig);
-      const latest = latestFusedSample(fused);
-      if (latest) {
-        return {
-          kind: 'fused',
-          samples: fused.map((sample) => ({ t: sample.t, heading: sample.heading })),
-          heading: latest.heading,
-          gyroOnly: latest.gyroOnly,
-        };
-      }
+    const replay = fusion.replayPending();
+    examined += replay.processed;
+    const latest = replay.headings[replay.headings.length - 1] ?? fusion.latestSettled();
+    if (latest) {
+      return {
+        kind: 'fused',
+        samples: mergedHeadings(replay.headings),
+        heading: latest.heading,
+        gyroOnly: latest.gyroOnly,
+      };
     }
     if (
       headingSamples.some((sample) => Number.isFinite(sample.t) && Number.isFinite(sample.heading))
@@ -199,8 +232,9 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   }
 
   function compute(): EngineSnapshot {
-    const steps = currentSteps();
+    maintainBounds();
     const course = headingCourse();
+    const steps = currentSteps();
     const rawPath = integratePath(
       steps,
       course.kind === 'constant' ? course.heading : course.samples,
@@ -223,19 +257,104 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     return snapshot;
   }
 
+  function absorbHeadings(headings: readonly FusedHeading[]): void {
+    for (const heading of headings) {
+      const previous = fusedHeadings[fusedHeadings.length - 1];
+      if (previous && previous.t === heading.t) previous.heading = heading.heading;
+      else fusedHeadings.push({ t: heading.t, heading: heading.heading });
+    }
+  }
+
+  function mergedHeadings(replay: readonly FusedHeading[]): HeadingSample[] {
+    const samples = fusedHeadings.map(copyHeading);
+    for (const heading of replay) {
+      const previous = samples[samples.length - 1];
+      if (previous && previous.t === heading.t) previous.heading = heading.heading;
+      else samples.push({ t: heading.t, heading: heading.heading });
+    }
+    return samples;
+  }
+
+  function fusionActive(): boolean {
+    return fusion.latestSettled() !== null || fusion.pendingCount() > 0;
+  }
+
+  function alignBaked(collapseBefore: number): void {
+    if (!stepsAcc.prefixStable()) {
+      baked.length = 0;
+      return;
+    }
+    const committed = stepsAcc.committed();
+    examined += stepsAcc.takeExamined();
+    if (baked.length > committed.length) baked.length = committed.length;
+    for (let index = 0; index < baked.length; index++) {
+      if (baked[index]!.t !== committed[index]!.t) {
+        baked.length = index;
+        break;
+      }
+    }
+    while (baked.length < committed.length) {
+      const step = committed[baked.length]!;
+      if (!(step.t < collapseBefore)) break;
+      baked.push({ t: step.t, heading: holdHeading(fusedHeadings, step.t) });
+    }
+  }
+
+  function bakeExplicit(collapseBefore: number): void {
+    if (!explicitSteps.some((step) => Number.isFinite(step.t))) return;
+    for (const step of explicitSteps) {
+      if (step.heading !== undefined && Number.isFinite(step.heading)) continue;
+      if (!(step.t < collapseBefore)) continue;
+      step.heading = holdHeading(fusedHeadings, step.t);
+    }
+  }
+
+  function collapseHeadings(collapseBefore: number): void {
+    let anchor = -1;
+    for (let index = 0; index < fusedHeadings.length; index++) {
+      if (fusedHeadings[index]!.t < collapseBefore) anchor = index;
+      else break;
+    }
+    if (anchor > 0) fusedHeadings.splice(0, anchor);
+  }
+
+  function maintainBounds(): void {
+    if (!fusionActive()) {
+      if (!stepsAcc.prefixStable()) baked.length = 0;
+      return;
+    }
+    const oldestPending = fusion.oldestPendingT();
+    const horizon = stepsAcc.oldestRetainedT();
+    let collapseBefore = oldestPending ?? Number.POSITIVE_INFINITY;
+    if (horizon !== null && horizon < collapseBefore) collapseBefore = horizon;
+
+    alignBaked(collapseBefore);
+    bakeExplicit(collapseBefore);
+    if (stepsAcc.prefixStable()) collapseHeadings(collapseBefore);
+    if (fusedHeadings.length > HEADING_SAMPLE_CAP) {
+      fusedHeadings.splice(0, fusedHeadings.length - HEADING_SAMPLE_CAP);
+    }
+  }
+
   const engine: LiveFloorwalkerEngine = {
     pushAccel(sample) {
-      accels.push(copyAccel(sample));
+      stepsAcc.push(sample);
+      examined += stepsAcc.takeExamined();
       if (accelAccepted(sample)) accepted = true;
       touch();
     },
     pushGyro(sample) {
-      gyros.push(copyGyro(sample));
+      const fold = fusion.pushGyro(sample);
+      absorbHeadings(fold.headings);
+      examined += fold.processed;
       if (gyroAccepted(sample)) accepted = true;
+      if (fusedHeadings.length > HEADING_SAMPLE_CAP) maintainBounds();
       touch();
     },
     pushMag(sample) {
-      mags.push({ t: sample.t, x: sample.x, y: sample.y, z: sample.z });
+      const fold = fusion.pushMag(sample);
+      absorbHeadings(fold.headings);
+      examined += fold.processed;
       if (
         Number.isFinite(sample.t) &&
         Number.isFinite(sample.x) &&
@@ -244,6 +363,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       ) {
         accepted = true;
       }
+      if (fusedHeadings.length > HEADING_SAMPLE_CAP) maintainBounds();
       touch();
     },
     pushStep(step) {
@@ -317,15 +437,18 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       return recalled !== null;
     },
     reset() {
-      accels.length = 0;
-      gyros.length = 0;
-      mags.length = 0;
+      stepsAcc.reset();
+      fusion.reset();
+      fusedHeadings.length = 0;
+      baked.length = 0;
       explicitSteps.length = 0;
       headingSamples.length = 0;
       stepLengthM = initialLength;
       drift = cloneDrift(initialDrift);
       accepted = false;
       recalled = null;
+      examined = 0;
+      lastExamined = 0;
       touch();
     },
     getStepLength() {
@@ -334,7 +457,11 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     getSnapshot() {
       if (recalled) return cloneSnapshot(recalled);
       if (!accepted && emptySnapshot) return cloneSnapshot(emptySnapshot);
-      cached ??= compute();
+      if (!cached) {
+        cached = compute();
+        lastExamined = examined;
+        examined = 0;
+      }
       return cloneSnapshot(cached);
     },
     snapshotForSave() {
@@ -344,6 +471,14 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     },
     sensorsActive() {
       return feed !== null || starting !== null;
+    },
+    bufferStats() {
+      return {
+        examined: cached ? lastExamined : examined,
+        accelRetained: stepsAcc.retained(),
+        fusionPending: fusion.pendingCount(),
+        headingRetained: fusedHeadings.length,
+      };
     },
     startSensors(sensorOptions) {
       if (feed) return Promise.resolve();
@@ -485,19 +620,6 @@ function snapshotHeading(course: Course, steps: readonly PathStep[]): number {
   return course.heading;
 }
 
-function latestFusedSample(samples: readonly FusedHeading[]): FusedHeading | null {
-  let bestT = Number.NEGATIVE_INFINITY;
-  let best: FusedHeading | null = null;
-  for (const sample of samples) {
-    if (!Number.isFinite(sample.t) || !Number.isFinite(sample.heading)) continue;
-    if (!best || sample.t >= bestT) {
-      best = sample;
-      bestT = sample.t;
-    }
-  }
-  return best;
-}
-
 function latestSampleHeading(samples: readonly HeadingSample[]): number {
   let bestT = Number.NEGATIVE_INFINITY;
   let best = 0;
@@ -542,11 +664,6 @@ function accelAccepted(sample: StepSample): boolean {
   return Number.isFinite(sample.magnitude);
 }
 
-function copyAccel(sample: StepSample): StepSample {
-  if ('x' in sample) return { t: sample.t, x: sample.x, y: sample.y, z: sample.z };
-  return { t: sample.t, magnitude: sample.magnitude };
-}
-
 function copyPathStep(step: PathStep): PathStep {
   if (step.heading === undefined) return { t: step.t };
   return { t: step.t, heading: step.heading };
@@ -554,11 +671,6 @@ function copyPathStep(step: PathStep): PathStep {
 
 function copyHeading(sample: HeadingSample): HeadingSample {
   return { t: sample.t, heading: sample.heading };
-}
-
-function copyGyro(sample: GyroSample): GyroSample {
-  if ('brake' in sample) return { t: sample.t, brake: true };
-  return { t: sample.t, yawRate: sample.yawRate };
 }
 
 function gyroAccepted(sample: GyroSample): boolean {
@@ -609,6 +721,24 @@ function cloneSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
 
 function copyPoint(point: PathPoint): PathPoint {
   return { x: point.x, y: point.y, t: point.t };
+}
+
+/** Latest sample at or before `t`. 0° when every sample is still in the future. */
+function holdHeading(samples: readonly HeadingSample[], t: number): number {
+  let lo = 0;
+  let hi = samples.length - 1;
+  let heading = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const sample = samples[mid]!;
+    if (sample.t <= t) {
+      heading = sample.heading;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return heading;
 }
 
 function wrap360(deg: number): number {
