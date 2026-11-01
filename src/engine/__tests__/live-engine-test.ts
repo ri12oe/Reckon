@@ -206,7 +206,7 @@ describe('sensor walk', () => {
     expect(snapshot.rawPath[5]).toEqual({ x: 0, y: 5, t: 2500 });
   });
 
-  test('an 80° compass jump would end at (4.924, 3.868); the hold keeps 8 steps on (0, 8)', () => {
+  test('a stable 80° compass reacquires and the walk leaves the north line', () => {
     const planted = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000];
     const times = sampleTimes(0, 4000);
     const engine = createLiveEngine({ stepLengthM: 1 });
@@ -229,6 +229,19 @@ describe('sensor walk', () => {
       { jumpThresholdDeg: 180, reacquireMaxDeg: 180 },
     );
     const trustedAt3000 = trusted.find((sample) => sample.t === 3000);
+    const tau = 1.5;
+    const caught = 80 * (1 - Math.exp(-(3000 - 980) / 1000 / tau));
+    const headingAt = (t: number) => {
+      if (t < 1400) return 0;
+      if (t <= 3000) return 80 * (1 - Math.exp(-(t - 980) / 1000 / tau));
+      if (t < 3420) return caught;
+      return caught * Math.exp(-(t - 3000) / 1000 / tau);
+    };
+    const blended = integratePath(
+      planted.map((t) => ({ t, heading: headingAt(t) })),
+      0,
+      { stepLength: 1 },
+    );
 
     expect(times).toHaveLength(201);
     expect(naive).toHaveLength(9);
@@ -236,13 +249,19 @@ describe('sensor walk', () => {
     expect(naive[8]!.y).toBeCloseTo(3.868240888335, 9);
     expect(naive[8]!.t).toBe(4000);
     expect(trustedAt3000?.heading).toBeCloseTo(59.1915, 3);
+    expect(headingAt(4000)).toBeCloseTo(30.3899, 4);
 
     const snapshot = engine.getSnapshot();
     expect(snapshot.stepCount).toBe(8);
-    expect(snapshot.heading).toBe(0);
+    expect(snapshot.heading).toBeCloseTo(30.3899, 4);
+    expect(snapshot.heading).toBeCloseTo(headingAt(4000), 6);
     expect(snapshot.rawPath.slice(1).map((point) => point.t)).toEqual(planted);
-    expect(snapshot.rawPath[8]).toEqual({ x: 0, y: 8, t: 4000 });
-    expect(snapshot.correctedPath[8]).toEqual({ x: 0, y: 8, t: 4000 });
+    expect(snapshot.rawPath[8]!.x).toBeCloseTo(blended[8]!.x, 4);
+    expect(snapshot.rawPath[8]!.y).toBeCloseTo(blended[8]!.y, 4);
+    expect(snapshot.rawPath[8]!.t).toBe(4000);
+    expect(snapshot.correctedPath[8]!.x).toBeCloseTo(blended[8]!.x, 4);
+    expect(snapshot.correctedPath[8]!.y).toBeCloseTo(blended[8]!.y, 4);
+    expect(snapshot.rawPath[8]).not.toEqual({ x: 0, y: 8, t: 4000 });
     expect(snapshot.rawPath[8]).not.toEqual(naive[8]);
   });
 

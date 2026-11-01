@@ -196,7 +196,7 @@ describe('fuseHeading', () => {
     expect(settled.every((sample) => !sample.interference && !sample.gyroOnly)).toBe(true);
   });
 
-  test('an 80° compass jump holds 0.0°; trusting it would pull the heading to 59.19°', () => {
+  test('a stable 80° compass reacquires after the hold and blends toward 80°', () => {
     const times = clock(0, 5000);
     const gyro = gyroAt(times, 0);
     const mag = magAt(times, (t) => (t >= 1000 && t <= 3000 ? field(80) : north()));
@@ -210,20 +210,24 @@ describe('fuseHeading', () => {
       interference: false,
       gyroOnly: false,
     });
-    expect(at(held, 2000)).toMatchObject({
-      heading: 0,
-      interference: true,
-      gyroOnly: true,
-    });
+    expect(at(held, 1380)).toMatchObject({ heading: 0, interference: true, gyroOnly: true });
+    expect(at(held, 1400).heading).toBeCloseTo(19.5373, 4);
+    expect(at(held, 1400)).toMatchObject({ interference: false, gyroOnly: false });
+    expect(at(held, 2000).heading).toBeCloseTo(39.4706, 4);
     expect(at(held, 2000).magneticHeading).toBeCloseTo(80, 6);
-    expect(at(held, 3000)).toMatchObject({ heading: 0, interference: true, gyroOnly: true });
-    expect(at(held, 3400)).toMatchObject({ heading: 0, interference: true, gyroOnly: true });
+    expect(at(held, 2000)).toMatchObject({ interference: false, gyroOnly: false });
+    expect(at(held, 3000).heading).toBeCloseTo(59.1915, 4);
+    expect(at(held, 3000)).toMatchObject({ interference: false, gyroOnly: false });
+    expect(at(held, 3400).heading).toBeCloseTo(59.1915, 4);
+    expect(at(held, 3400)).toMatchObject({ interference: true, gyroOnly: true });
+    expect(at(held, 3420).heading).toBeCloseTo(44.736, 4);
     expect(at(held, 3420)).toMatchObject({
-      heading: 0,
       magneticHeading: 0,
       interference: false,
       gyroOnly: false,
     });
+    expect(at(held, 4000).heading).toBeCloseTo(30.3899, 4);
+    expect(at(held, 4000)).toMatchObject({ interference: false, gyroOnly: false });
     expect(at(trusted, 3000).heading).toBeCloseTo(59.1915, 4);
     expect(at(trusted, 3000).interference).toBe(false);
   });

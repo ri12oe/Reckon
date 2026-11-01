@@ -9,12 +9,14 @@
  * 2. Blend the magnetometer heading with time constant `tauSeconds`.
  *    The magnetometer is absolute and noisy.
  * 3. When the field is interfered, stop the blend and trust the gyro
- *    until the magnetometer is trustworthy again for `recoverHoldMs`.
+ *    until a magnetometer window of `recoverHoldMs` is clean and stable.
  *
- * Interference is any of:
- * - magnitude outside the Earth-field window, or too far from the trusted baseline
- * - a heading jump the gyroscope did not measure
- * - a sustained disagreement larger than `reacquireMaxDeg`
+ * Interference is a bad magnitude, or a jump or a disagreement with the
+ * gyro while that window is not ready. The window is a property of the
+ * magnetometer: every kept sample is magnitude-clean and within
+ * `jumpThresholdDeg` of the newest heading. Gyro disagreement cannot
+ * veto it. A ready window leaves the hold and blends, even when the
+ * compass still disagrees with the gyro by more than `reacquireMaxDeg`.
  *
  * The first in-range magnetometer sample snaps the heading. The recovery
  * hold applies only after that fix has been lost.
@@ -86,11 +88,11 @@ export type HeadingFusionConfig = {
    */
   jumpThresholdDeg: number;
   /**
-   * While tracking, or when trying to reacquire, a magnetometer heading
-   * farther than this from the gyro heading is not trusted.
+   * While the recovery window is not ready, a magnetometer heading farther
+   * than this from the fused heading is not trusted.
    */
   reacquireMaxDeg: number;
-  /** Clean magnetometer time required before blending again, milliseconds. */
+  /** Milliseconds of clean, stable magnetometer samples required to leave a hold. */
   recoverHoldMs: number;
   /** Heading used until the first trusted magnetometer sample, degrees. */
   initialHeadingDeg: number;
@@ -151,17 +153,26 @@ type GyroEvent = { t: number; rank: 0; yawRate: number };
 type MagEvent = { t: number; rank: 1; x: number; y: number; z: number };
 type TimedEvent = GyroEvent | MagEvent;
 
+type Phase = { kind: 'open' } | { kind: 'rejected' } | { kind: 'live' } | { kind: 'held' };
+
+type MagObs = {
+  t: number;
+  magnitudeUt: number;
+  /** Null when the horizontal field does not define a heading. */
+  headingDeg: number | null;
+};
+
 type FusionState = {
   heading: number;
   yawDegPerSec: number;
   lastT: number | null;
-  hasFix: boolean;
-  interfered: boolean;
-  cleanSince: number | null;
+  phase: Phase;
   baselineUt: number | null;
   lastMagHeading: number | null;
   headingMark: number;
   lastTrustedT: number | null;
+  /** Samples with t >= now - recoverHoldMs, oldest first. */
+  recentMag: MagObs[];
 };
 
 function createState(initialHeadingDeg: number): FusionState {
@@ -170,13 +181,12 @@ function createState(initialHeadingDeg: number): FusionState {
     heading,
     yawDegPerSec: 0,
     lastT: null,
-    hasFix: false,
-    interfered: false,
-    cleanSince: null,
+    phase: { kind: 'open' },
     baselineUt: null,
     lastMagHeading: null,
     headingMark: heading,
     lastTrustedT: null,
+    recentMag: [],
   };
 }
 
@@ -233,8 +243,8 @@ function step(
   return {
     t,
     heading: state.heading,
-    gyroOnly: !state.hasFix || state.interfered,
-    interference: state.interfered,
+    gyroOnly: state.phase.kind !== 'live',
+    interference: state.phase.kind === 'held' || state.phase.kind === 'rejected',
     magneticHeading,
     magnitudeUt,
   };
@@ -253,17 +263,36 @@ function applyMagnetometer(
     magneticHeading !== null &&
     horizontal >= config.minHorizontalUt &&
     Number.isFinite(magneticHeading);
+
+  state.recentMag.push({
+    t,
+    magnitudeUt,
+    headingDeg: headingUsable ? magneticHeading : null,
+  });
+  // Keep t >= now - recoverHoldMs. The sample exactly one hold ago stays,
+  // so the pre-jump heading still blocks release on the tick before it ages out.
+  const oldest = t - config.recoverHoldMs;
+  while (state.recentMag.length > 0 && state.recentMag[0]!.t < oldest) {
+    state.recentMag.shift();
+  }
+
   const magnitudeBad = magnitudeIsBad(magnitudeUt, state.baselineUt, config);
 
   if (!headingUsable) {
-    if (magnitudeBad) latchInterference(state);
-    else if (state.interfered) state.cleanSince = null;
+    if (magnitudeBad) latch(state);
     return { magneticHeading, magnitudeUt };
   }
 
-  if (!state.hasFix) {
+  if (state.phase.kind === 'open' || state.phase.kind === 'rejected') {
     if (!magnitudeBad) acquire(state, t, magneticHeading, magnitudeUt);
-    else latchInterference(state);
+    else state.phase = { kind: 'rejected' };
+    return { magneticHeading, magnitudeUt };
+  }
+
+  if (recoveryReady(state.recentMag, state.baselineUt, config)) {
+    state.phase = { kind: 'live' };
+    const innovation = wrap180(magneticHeading - state.heading);
+    correct(state, t, magneticHeading, magnitudeUt, innovation, config);
     return { magneticHeading, magnitudeUt };
   }
 
@@ -273,20 +302,33 @@ function applyMagnetometer(
   const disagrees = innovationAbs > config.reacquireMaxDeg;
 
   if (magnitudeBad || sudden || disagrees) {
-    latchInterference(state);
-  } else if (state.interfered) {
-    if (state.cleanSince === null) state.cleanSince = t;
-    if (t - state.cleanSince >= config.recoverHoldMs) {
-      state.interfered = false;
-      state.cleanSince = null;
-    }
+    if (state.phase.kind === 'live') state.phase = { kind: 'held' };
+    return { magneticHeading, magnitudeUt };
   }
 
-  if (!state.interfered && !magnitudeBad && !sudden) {
+  if (state.phase.kind === 'live') {
     correct(state, t, magneticHeading, magnitudeUt, innovation, config);
   }
 
   return { magneticHeading, magnitudeUt };
+}
+
+function recoveryReady(
+  recentMag: readonly MagObs[],
+  baselineUt: number | null,
+  config: HeadingFusionConfig,
+): boolean {
+  const first = recentMag[0];
+  const last = recentMag[recentMag.length - 1];
+  if (!first || !last || last.headingDeg === null) return false;
+  if (last.t - first.t < config.recoverHoldMs) return false;
+
+  for (const obs of recentMag) {
+    if (obs.headingDeg === null) return false;
+    if (Math.abs(wrap180(obs.headingDeg - last.headingDeg)) > config.jumpThresholdDeg) return false;
+    if (magnitudeIsBad(obs.magnitudeUt, baselineUt, config)) return false;
+  }
+  return true;
 }
 
 function acquire(
@@ -296,9 +338,7 @@ function acquire(
   magnitudeUt: number,
 ): void {
   state.heading = magneticHeading;
-  state.hasFix = true;
-  state.interfered = false;
-  state.cleanSince = null;
+  state.phase = { kind: 'live' };
   state.baselineUt = magnitudeUt;
   state.lastMagHeading = magneticHeading;
   state.headingMark = magneticHeading;
@@ -336,9 +376,12 @@ function isJump(state: FusionState, magneticHeading: number, config: HeadingFusi
   return Math.abs(wrap180(magDelta - gyroDelta)) > config.jumpThresholdDeg;
 }
 
-function latchInterference(state: FusionState): void {
-  state.interfered = true;
-  state.cleanSince = null;
+function latch(state: FusionState): void {
+  if (state.phase.kind === 'live' || state.phase.kind === 'held') {
+    state.phase = { kind: 'held' };
+    return;
+  }
+  state.phase = { kind: 'rejected' };
 }
 
 function magnitudeIsBad(
