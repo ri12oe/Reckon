@@ -173,6 +173,73 @@ describe('sensor frame conversion', () => {
     expect(accel).toEqual([{ t: 42, x: 0, y: 0, z: -G }]);
     feed.stop();
   });
+
+  test('a missing timestamp stays on the sensor millisecond clock', async () => {
+    const sensors = motionSensors();
+    const accel: { t: number }[] = [];
+    let wall = 1_762_000_000_000;
+    const feed = await startSensorFeed(
+      {
+        pushAccel: (sample) => accel.push(sample),
+        pushGyro: () => undefined,
+        pushMag: () => undefined,
+      },
+      { sensors, nowMs: () => wall },
+    );
+
+    sensors.Accelerometer.emit({ x: 0, y: 0, z: 1, timestamp: 10 });
+    wall += 20;
+    sensors.Accelerometer.emit({ x: 0, y: 0, z: 1 });
+
+    const dt = accel[1]!.t - accel[0]!.t;
+    const alpha = 1 - Math.exp(-dt / 1000 / 0.4);
+    expect({ dt, alpha }).toEqual({ dt: 20, alpha: expect.closeTo(1 - Math.exp(-0.05), 12) });
+    feed.stop();
+  });
+
+  test('millisecond sensor timestamps are not scaled a second time', async () => {
+    const sensors = motionSensors();
+    const accel: { t: number }[] = [];
+    const feed = await startSensorFeed(
+      {
+        pushAccel: (sample) => accel.push(sample),
+        pushGyro: () => undefined,
+        pushMag: () => undefined,
+      },
+      { sensors, nowMs: () => 0 },
+    );
+
+    sensors.Accelerometer.emit({ x: 0, y: 0, z: 1, timestamp: 10_000 });
+    sensors.Accelerometer.emit({ x: 0, y: 0, z: 1, timestamp: 10_020 });
+
+    const dt = accel[1]!.t - accel[0]!.t;
+    expect(dt).toBe(20);
+    feed.stop();
+  });
+
+  test('a wall-clock sample followed by sensor seconds stays on one clock', async () => {
+    const sensors = motionSensors();
+    const accel: { t: number }[] = [];
+    let wall = 1_762_000_000_000;
+    const feed = await startSensorFeed(
+      {
+        pushAccel: (sample) => accel.push(sample),
+        pushGyro: () => undefined,
+        pushMag: () => undefined,
+      },
+      { sensors, nowMs: () => wall },
+    );
+
+    sensors.Accelerometer.emit({ x: 0, y: 0, z: 1 });
+    wall += 20;
+    sensors.Accelerometer.emit({ x: 0, y: 0, z: 1, timestamp: 10 });
+    wall += 20;
+    sensors.Accelerometer.emit({ x: 0, y: 0, z: 1, timestamp: 10.02 });
+
+    expect(accel[1]!.t - accel[0]!.t).toBe(20);
+    expect(accel[2]!.t - accel[1]!.t).toBe(20);
+    feed.stop();
+  });
 });
 
 describe('live engine pushes', () => {
