@@ -430,8 +430,73 @@ describe('drift correction on the live path', () => {
     expect(after.heading).toBe(10);
   });
 
-  test('2 steps at 5° then 2 at 95°: raw ends at (2.167, 1.818); the snap is the corner (2, 2)', () => {
+  test('default config leaves a 10° walk unsnapped; opt-in snap, a second door tag, and reset', () => {
     const engine = createLiveEngine({ stepLengthM: 1 });
+    for (const [index, heading] of [10, 10, 10, 10].entries()) {
+      engine.pushStep({ t: (index + 1) * 500, heading });
+    }
+
+    const plain = engine.getSnapshot();
+    expect(plain.stepCount).toBe(4);
+    expect(plain.heading).toBe(10);
+    expect(plain.correctedPath).toEqual(plain.rawPath);
+    expectPoint(plain.rawPath[4]!, 0.694592710668, 3.939231012049, 2000);
+    expect(plain.pins).toEqual([]);
+
+    engine.setDrift({ corridor: true });
+    const snapped = engine.getSnapshot();
+    expectPoint(snapped.rawPath[4]!, 0.694592710668, 3.939231012049, 2000);
+    expect(snapped.correctedPath[4]!.x).toBe(0);
+    expect(snapped.correctedPath[4]!.y).toBeCloseTo(4, 9);
+    expect(snapped.correctedPath[4]!.t).toBe(2000);
+
+    engine.tagLandmark({ id: 'door', pathIndex: 0, label: 'door' });
+    engine.tagLandmark({ id: 'door', pathIndex: 4 });
+    engine.addPin({ id: 'desk', x: 1.5, y: 2.5, label: 'desk' });
+    const aligned = engine.getSnapshot();
+
+    expectPoint(aligned.rawPath[4]!, 0.694592710668, 3.939231012049, 2000);
+    expect(aligned.correctedPath[0]).toEqual({ x: 0, y: 0, t: 0 });
+    expect(aligned.correctedPath[2]).toEqual({ x: 0, y: 0, t: 1000 });
+    expect(aligned.correctedPath[4]).toEqual({ x: 0, y: 0, t: 2000 });
+    expect(aligned.pins).toEqual([
+      { id: 'door', x: 0, y: 0, label: 'door' },
+      { id: 'desk', x: 1.5, y: 2.5, label: 'desk' },
+    ]);
+
+    engine.pushAccel({ t: 0, x: 0, y: 0, z: STANDARD_GRAVITY_MPS2 });
+    engine.pushGyro({ t: 0, yawRate: 0 });
+    engine.pushMag({ t: 0, x: 30, y: 0, z: 40 });
+    const loaded = engine.bufferStats();
+    expect(loaded.accelRetained).toBe(1);
+    expect(loaded.fusionPending).toBe(2);
+    expect(loaded.headingRetained).toBe(0);
+    expect(engine.getSnapshot().stepCount).toBe(4);
+    expect(engine.getSnapshot().pins).toHaveLength(2);
+
+    engine.reset();
+    const cleared = engine.getSnapshot();
+    const stats = engine.bufferStats();
+    expect(cleared.stepCount).toBe(0);
+    expect(cleared.pins).toEqual([]);
+    expect(cleared.rawPath).toEqual([{ x: 0, y: 0, t: 0 }]);
+    expect(cleared.correctedPath).toEqual([{ x: 0, y: 0, t: 0 }]);
+    expect(stats.accelRetained).toBe(0);
+    expect(stats.fusionPending).toBe(0);
+    expect(stats.headingRetained).toBe(0);
+    expect(stats.examined).toBe(0);
+
+    engine.pushStep({ t: 500, heading: 10 });
+    engine.pushStep({ t: 1000, heading: 10 });
+    const again = engine.getSnapshot();
+    expect(again.stepCount).toBe(2);
+    expect(again.pins).toEqual([]);
+    expect(again.correctedPath).toEqual(again.rawPath);
+    expectPoint(again.rawPath[2]!, 0.347296355334, 1.969615506024, 1000);
+  });
+
+  test('2 steps at 5° then 2 at 95°, with snap on: raw ends at (2.167, 1.818); the snap is the corner (2, 2)', () => {
+    const engine = createLiveEngine({ stepLengthM: 1, drift: { corridor: true } });
     for (const [index, heading] of [5, 5, 95, 95].entries()) {
       engine.pushStep({ t: (index + 1) * 500, heading });
     }
@@ -446,9 +511,9 @@ describe('drift correction on the live path', () => {
     expectPoint(snapshot.correctedPath[4]!, 2, 2, 2000);
   });
 
-  test('a noisy 4 m square ends at (0.052, −0.121) raw and (0, 0) corrected', () => {
+  test('a noisy 4 m square, with snap on, ends at (0.052, −0.121) raw and (0, 0) corrected', () => {
     const headings = [...NORTH, ...EAST, ...SOUTH, ...WEST];
-    const engine = createLiveEngine({ stepLengthM: 1 });
+    const engine = createLiveEngine({ stepLengthM: 1, drift: { corridor: true } });
     for (const [index, heading] of headings.entries()) {
       engine.pushStep({ t: (index + 1) * 500, heading });
     }

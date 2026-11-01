@@ -191,9 +191,9 @@ describe('live engine ingest', () => {
     );
   });
 
-  test('the noisy 4 m square still closes: heading 265°, raw (0.052, −0.121), corrected (0, 0)', () => {
+  test('the noisy 4 m square still closes when snap is on: heading 265°, raw (0.052, −0.121), corrected (0, 0)', () => {
     const headings = [6, -4, 8, 2, 95, 87, 97, 91, 184, 174, 183, 188, 268, 276, 274, 265];
-    const engine = createLiveEngine({ stepLengthM: 1 });
+    const engine = createLiveEngine({ stepLengthM: 1, drift: { corridor: true } });
     for (const [index, heading] of headings.entries()) {
       engine.pushStep({ t: (index + 1) * 500, heading });
     }

@@ -8,7 +8,8 @@
  * 2. Gyroscope and magnetometer samples → `fuseHeading`.
  * 3. `estimateStepLength` when the caller calibrates a known distance.
  * 4. `integratePath` → the raw walk.
- * 5. `correctDrift` → the corrected walk (corridor snap by default).
+ * 5. `correctDrift` → the corrected walk. Corridor snap runs only when
+ *    the caller opts in.
  *
  * Samples are pushed in, including from `startSensors` (the Expo motion
  * feed). `getSnapshot()` runs the pipeline. A finite `pushStep` selects
@@ -28,9 +29,11 @@
  * the latest pushed heading, else the latest step heading, else the
  * configured initial heading (0°).
  *
- * Corridor snap is on unless `drift.corridor` says otherwise. Loop closure
- * and landmark tags are off until the caller asks. Landmark tags also
- * become pins, sitting on the corrected path at the earlier tag.
+ * Corridor snap is off unless `drift.corridor` is `true` or a snap config.
+ * Loop closure and landmark tags are off until the caller asks. A landmark
+ * tag is also a pin. The pin sits on the corrected path at the earlier tag,
+ * so a later snap or a second tag of the same id keeps that pin on the
+ * landmark. `reset()` drops samples, steps, and pins.
  *
  * `recallSnapshot` shows a saved walk from `getSnapshot` until `clearRecall`
  * or `reset`. It does not run the pipeline. Samples still accumulate and
@@ -79,8 +82,8 @@ export type LiveEngineConfig = {
   /** Meters per step before a calibration. Default 0.75. */
   stepLengthM?: number;
   /**
-   * Drift passes. Omitting `corridor` snaps with the corridor defaults.
-   * `corridor: false` leaves the integrated headings alone.
+   * Drift passes. Corridor snap is off unless `corridor` is `true` or a
+   * config object. Omitting it, or `corridor: false`, leaves headings alone.
    */
   drift?: DriftCorrectionOptions;
   /** Origin easting, meters. */
@@ -527,10 +530,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
 }
 
 function seedDrift(drift: DriftCorrectionOptions | undefined): DriftState {
-  const corridor =
-    drift && 'corridor' in drift && drift.corridor !== undefined
-      ? copyCorridor(drift.corridor)
-      : true;
+  const corridor = copyCorridor(drift?.corridor);
   const tags = copyTags(drift?.landmarks);
   return {
     corridor,
