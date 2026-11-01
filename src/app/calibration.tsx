@@ -2,6 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
+import { commitStepLength } from '@/calibration/commit';
 import {
   CALIBRATION_STEPS,
   beginCalibration,
@@ -19,9 +20,9 @@ import { Screen } from '@/components/screen';
 import { StepRing } from '@/components/step-ring';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing, withAlpha } from '@/constants/theme';
-import { isCalibrated, markCalibrated } from '@/db/calibration';
+import { isCalibrated, readStepLength } from '@/db/calibration';
 import { ensureDatabase } from '@/db/database';
-import { getEngine } from '@/engine';
+import { createLiveEngine, getEngine, type LiveFloorwalkerEngine } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
 
 /** Re-read the engine often enough to catch a step as it lands. */
@@ -39,7 +40,9 @@ export default function CalibrationScreen() {
   const [distanceText, setDistanceText] = useState('');
   const [courseMeters, setCourseMeters] = useState<number | null>(null);
   const [status, setStatus] = useState('');
-  const [stepLengthM, setStepLengthM] = useState<number | null>(null);
+  const [stepLengthM, setStepLengthM] = useState<number | null>(
+    () => readStepLength()?.stepLengthM ?? null,
+  );
   const sessionRef = useRef(session);
   const distanceTextRef = useRef(distanceText);
   const distanceRef = useRef<number | null>(null);
@@ -54,6 +57,7 @@ export default function CalibrationScreen() {
       const next = initialSession();
       sessionRef.current = next;
       setSession(next);
+      setStepLengthM(readStepLength()?.stepLengthM ?? null);
       setReady(true);
     });
     return () => {
@@ -63,7 +67,8 @@ export default function CalibrationScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      const engine = getEngine();
+      const live = getEngine();
+      let calibration: LiveFloorwalkerEngine | null = null;
       let timer: ReturnType<typeof setInterval> | undefined;
       let walking = false;
 
@@ -74,7 +79,7 @@ export default function CalibrationScreen() {
           clearInterval(timer);
           timer = undefined;
         }
-        if (started) engine.stopSensors();
+        if (started) calibration?.stopSensors();
       };
 
       startRef.current = () => {
@@ -86,6 +91,8 @@ export default function CalibrationScreen() {
         }
         const next = beginCalibration(sessionRef.current);
         if (next.phase !== 'walking') return;
+        const engine = createLiveEngine();
+        calibration = engine;
         distanceRef.current = distanceM;
         setCourseMeters(distanceM);
         setStatus('');
@@ -102,17 +109,27 @@ export default function CalibrationScreen() {
             stepsTowardCalibration(baseline, engine.getSnapshot().stepCount),
           );
           if (!walking) return;
-          sessionRef.current = progressed;
-          setSession(progressed);
           if (progressed.phase === 'done') {
             halt();
-            const distanceM = distanceRef.current;
+            const course = distanceRef.current;
             const estimate =
-              distanceM === null ? null : engine.calibrateStepLength(distanceM, progressed.steps);
-            setStepLengthM(estimate?.stepLengthM ?? null);
-            if (!estimate) setStatus('That distance did not update step length.');
-            markCalibrated();
+              course === null ? null : engine.calibrateStepLength(course, progressed.steps);
+            const saved = commitStepLength(estimate, live);
+            if (!saved) {
+              const idle = { phase: 'idle' as const, steps: 0 };
+              sessionRef.current = idle;
+              setSession(idle);
+              setStepLengthM(readStepLength()?.stepLengthM ?? null);
+              setStatus('That distance did not update step length.');
+              return;
+            }
+            sessionRef.current = progressed;
+            setSession(progressed);
+            setStepLengthM(saved.stepLengthM);
+            return;
           }
+          sessionRef.current = progressed;
+          setSession(progressed);
         };
 
         tick();
