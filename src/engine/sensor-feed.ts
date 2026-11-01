@@ -5,7 +5,8 @@
  * (`Accelerometer`, `Gyroscope`, `Magnetometer`). This module subscribes
  * to those and pushes engine-frame samples. It does not read `Pedometer`.
  * Step counts come from accelerometer peaks in the engine, not from the
- * platform step counter.
+ * platform step counter. `DeviceMotion` is not used; gravity is a low-pass
+ * of the accelerometer, which is already subscribed for steps.
  *
  * Units, from the SDK 58 docs and the native modules:
  * - accelerometer: g-force (1 g = 9.80665 m/s²). Android divides by
@@ -15,25 +16,46 @@
  * - `timestamp`: seconds. The engine clock is milliseconds, so timestamps
  *   are rounded to the nearest millisecond.
  *
- * Device axes, the pass-through frame (Android sensor coordinates, and the
- * usual phone frame): +x to the right, +y toward the top of the device,
- * +z out of the screen. The engine body frame is +x forward, +y right,
- * +z down, which for a portrait phone held screen-up is:
+ * Device axes (Android sensor coordinates and the iOS device frame):
+ * +x to the right, +y toward the top of the device, +z out of the screen.
+ * The engine body frame is +x forward, +y right, +z down.
  *
- *   forward = device y, right = device x, down = −device z
+ * Accelerometer samples keep a fixed relabel into that body frame
+ * (`forward = device y`, `right = device x`, `down = −device z`). Step
+ * detection uses the magnitude, so the relabel does not have to follow
+ * the phone's tilt. iOS Core Motion, screen up and at rest, reports about
+ * −1 g on z rather than Android's +1 g.
  *
- * Gyroscope yaw is the rotation about that down axis. Right-hand rotation
- * about device +z (out of the screen, up) is counter-clockwise viewed from
- * above, so clockwise yaw is `−device.z`.
+ * Gyroscope yaw and the magnetometer heading do follow the tilt. A
+ * low-pass of the accelerometer estimates gravity; world-down is that
+ * vector (negated on Android, where the accelerometer reads specific
+ * force). Yaw rate is the gyro dotted with world-down, which is clockwise
+ * positive and equals `−device.z` when the screen is up. The magnetometer
+ * is projected onto the horizontal plane with that same down and with
+ * device +y as forward. See `level-attitude.ts`.
  *
- * iOS Core Motion, screen up and at rest, reports about −1 g on z rather
- * than Android's +1 g. Step detection uses the vector magnitude, so that
- * sign does not change the count. Heading uses the mapped axes above.
+ * When the top of the phone, or the current sample's acceleration, is
+ * past `LEVEL_MAX_TILT_FROM_HORIZONTAL_DEG` (70° off the horizon), the
+ * feed pauses: it pushes no accel, no gyro, and no mag, after one zero
+ * yaw rate so the fusion hold does not keep integrating the last turn.
+ * Tracking resumes once the pose is usable again. Until the first
+ * accelerometer sample, the phone is assumed screen-up.
  *
  * Callers inject `sensors` in tests. The default loader is `expo-sensors`.
  */
 
 import type { GyroSample, MagSample } from '@/engine/heading-fusion';
+import {
+  attitudeIsLevel,
+  FLAT_SCREEN_UP_DOWN,
+  gravityLowpassUsable,
+  levelMagnetometer,
+  smoothGravity,
+  worldDown,
+  yawAboutDown,
+  type AccelAtRest,
+  type Vec3,
+} from '@/engine/level-attitude';
 import { STANDARD_GRAVITY_MPS2, type AccelSample } from '@/engine/step-detector';
 
 /** 50 Hz. Matches the step detector's sample clock and stays under Android's 200 Hz cap. */
@@ -86,11 +108,27 @@ export type StartSensorFeedOptions = {
   updateIntervalMs?: number;
   /** Millisecond clock used when a measurement has no finite timestamp. */
   nowMs?: () => number;
+  /**
+   * Resting accelerometer direction. `'down'` is iOS Core Motion
+   * (screen up → z ≈ −1). `'up'` is Android `TYPE_ACCELEROMETER`
+   * (screen up → z ≈ +1). Omitted follows `Platform.OS`.
+   */
+  accelAtRest?: AccelAtRest;
 };
 
 type FeedState = {
   stopped: boolean;
   subscriptions: SensorSubscription[];
+};
+
+type AttitudeTracker = {
+  atRest: AccelAtRest;
+  gravity: Vec3 | null;
+  gravityT: number | null;
+  /** Latest world-down. Null until the first accelerometer sample. */
+  down: Vec3 | null;
+  /** False while the pose is past `LEVEL_MAX_TILT_FROM_HORIZONTAL_DEG`. */
+  level: boolean;
 };
 
 export function loadExpoMotionSensors(): MotionSensors {
@@ -113,6 +151,7 @@ export async function startSensorFeed(
   const intervalMs = resolveInterval(options?.updateIntervalMs);
   const nowMs = options?.nowMs ?? (() => Date.now());
   const state: FeedState = { stopped: false, subscriptions: [] };
+  const attitude = createAttitudeTracker(resolveAccelAtRest(options?.accelAtRest));
 
   const feed: SensorFeed = {
     stop() {
@@ -124,15 +163,17 @@ export async function startSensorFeed(
   };
 
   await subscribe(sensors.Accelerometer, intervalMs, state, (measurement) => {
-    const sample = accelFromDevice(measurement, nowMs);
-    if (sample) sink.pushAccel(sample);
+    const observed = observeAccel(attitude, measurement, nowMs);
+    if (!observed) return;
+    if (observed.hold) sink.pushGyro(observed.hold);
+    if (observed.accel) sink.pushAccel(observed.accel);
   });
   await subscribe(sensors.Gyroscope, intervalMs, state, (measurement) => {
-    const sample = gyroFromDevice(measurement, nowMs);
+    const sample = gyroFromDevice(attitude, measurement, nowMs);
     if (sample) sink.pushGyro(sample);
   });
   await subscribe(sensors.Magnetometer, intervalMs, state, (measurement) => {
-    const sample = magFromDevice(measurement, nowMs);
+    const sample = magFromDevice(attitude, measurement, nowMs);
     if (sample) sink.pushMag(sample);
   });
 
@@ -170,9 +211,51 @@ async function subscribe(
   state.subscriptions.push(subscription);
 }
 
-function accelFromDevice(measurement: SensorMeasurement, nowMs: () => number): AccelSample | null {
+function createAttitudeTracker(atRest: AccelAtRest): AttitudeTracker {
+  return { atRest, gravity: null, gravityT: null, down: null, level: true };
+}
+
+function observeAccel(
+  tracker: AttitudeTracker,
+  measurement: SensorMeasurement,
+  nowMs: () => number,
+): { accel: AccelSample | null; hold: GyroSample | null } | null {
   const t = timeMs(measurement, nowMs);
   if (t === null || !finiteAxes(measurement)) return null;
+
+  const reading = { x: measurement.x, y: measurement.y, z: measurement.z };
+  const dt = tracker.gravityT === null ? Number.POSITIVE_INFINITY : (t - tracker.gravityT) / 1000;
+  const next = smoothGravity(tracker.gravity, reading, dt);
+  if (next !== tracker.gravity) {
+    tracker.gravity = next;
+    tracker.gravityT = t;
+  }
+
+  if (tracker.gravity && gravityLowpassUsable(tracker.gravity)) {
+    tracker.down = worldDown(tracker.gravity, tracker.atRest);
+  }
+  const instant = worldDown(reading, tracker.atRest);
+  // No trusted gravity yet: assume the screen is up and still forward
+  // the accelerometer. A short or non-gravity sample must not tilt yaw.
+  if (tracker.down === null) {
+    tracker.level = true;
+    return { accel: accelFromDevice(measurement, t), hold: null };
+  }
+  // Free-fall and any other reading with no direction cannot be a step
+  // or a heading fix.
+  if (instant === null) {
+    const hold = tracker.level ? { t, yawRate: 0 } : null;
+    tracker.level = false;
+    return { accel: null, hold };
+  }
+  const level = attitudeIsLevel(tracker.down, instant);
+  const hold = tracker.level && !level ? { t, yawRate: 0 } : null;
+  tracker.level = level;
+  if (!level) return { accel: null, hold };
+  return { accel: accelFromDevice(measurement, t), hold };
+}
+
+function accelFromDevice(measurement: SensorMeasurement, t: number): AccelSample {
   return {
     t,
     x: measurement.y * STANDARD_GRAVITY_MPS2,
@@ -181,21 +264,41 @@ function accelFromDevice(measurement: SensorMeasurement, nowMs: () => number): A
   };
 }
 
-function gyroFromDevice(measurement: SensorMeasurement, nowMs: () => number): GyroSample | null {
+function gyroFromDevice(
+  tracker: AttitudeTracker,
+  measurement: SensorMeasurement,
+  nowMs: () => number,
+): GyroSample | null {
   const t = timeMs(measurement, nowMs);
-  if (t === null || !finiteAxes(measurement)) return null;
-  return { t, yawRate: -measurement.z };
+  if (t === null || !finiteAxes(measurement) || !tracker.level) return null;
+  const yawRate = yawAboutDown(measurement, tracker.down ?? FLAT_SCREEN_UP_DOWN);
+  if (yawRate === null || !Number.isFinite(yawRate)) return null;
+  return { t, yawRate };
 }
 
-function magFromDevice(measurement: SensorMeasurement, nowMs: () => number): MagSample | null {
+function magFromDevice(
+  tracker: AttitudeTracker,
+  measurement: SensorMeasurement,
+  nowMs: () => number,
+): MagSample | null {
   const t = timeMs(measurement, nowMs);
-  if (t === null || !finiteAxes(measurement)) return null;
-  return {
-    t,
-    x: measurement.y,
-    y: measurement.x,
-    z: -measurement.z,
-  };
+  if (t === null || !finiteAxes(measurement) || !tracker.level) return null;
+  const leveled = levelMagnetometer(measurement, tracker.down ?? FLAT_SCREEN_UP_DOWN);
+  if (!leveled) return null;
+  return { t, x: leveled.x, y: leveled.y, z: leveled.z };
+}
+
+function resolveAccelAtRest(value: AccelAtRest | undefined): AccelAtRest {
+  if (value === 'down' || value === 'up') return value;
+  return platformAccelAtRest();
+}
+
+function platformAccelAtRest(): AccelAtRest {
+  // Same lazy require as `expo-sensors`: engine tests must not load native
+  // modules until a feed actually starts, and Jest supplies the Platform mock.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Platform } = require('react-native') as typeof import('react-native');
+  return Platform.OS === 'android' ? 'up' : 'down';
 }
 
 function timeMs(measurement: SensorMeasurement, nowMs: () => number): number | null {
