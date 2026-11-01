@@ -100,6 +100,19 @@ export type {
 export { mockEngine } from '@/engine/mock-engine';
 
 export {
+  FLAT_SCREEN_UP_DOWN,
+  GRAVITY_LOWPASS_TAU_S,
+  LEVEL_MAX_TILT_FROM_HORIZONTAL_DEG,
+  attitudeIsLevel,
+  levelMagnetometer,
+  smoothGravity,
+  tiltFromHorizontalDeg,
+  worldDown,
+  yawAboutDown,
+} from '@/engine/level-attitude';
+export type { AccelAtRest, Vec3 } from '@/engine/level-attitude';
+
+export {
   DEFAULT_SENSOR_UPDATE_INTERVAL_MS,
   loadExpoMotionSensors,
   startSensorFeed,
