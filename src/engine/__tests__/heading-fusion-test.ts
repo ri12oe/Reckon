@@ -403,6 +403,28 @@ describe('fuseHeading', () => {
     expect(mag).toEqual(magBefore);
     expect(at(forward, 2000).heading).toBeCloseTo(45, 6);
   });
+
+  test('a tilt brake holds the heading; a measured 0 rad/s integrates minus the bias', () => {
+    const times = clock(0, 10000);
+    const gyro = gyroAt(times, 3);
+    const mag = magAt(times, north());
+    const brake = fuseHeading(
+      [...gyro, { t: 10000, brake: true }, { t: 12000, yawRate: yaw(90) }],
+      mag,
+    );
+    const still = fuseHeading(
+      [...gyro, { t: 10000, yawRate: 0 }, { t: 12000, yawRate: yaw(90) }],
+      mag,
+    );
+    const bias = 3 * (1 - Math.exp(-10 / 5));
+    const wrapped = (deg: number) => {
+      const turn = ((deg % 360) + 360) % 360;
+      return turn === 0 ? 0 : turn;
+    };
+
+    expect(at(brake, 12000).heading).toBeCloseTo(at(brake, 10000).heading, 6);
+    expect(at(still, 12000).heading).toBeCloseTo(wrapped(at(still, 10000).heading - bias * 2), 4);
+  });
 });
 
 describe('getEngine', () => {

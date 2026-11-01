@@ -254,6 +254,7 @@ describe('sensor walk', () => {
     const snapshot = engine.getSnapshot();
     expect(snapshot.stepCount).toBe(8);
     expect(snapshot.heading).toBeCloseTo(30.3899, 4);
+    expect(snapshot.gyroOnly).toBe(false);
     expect(snapshot.heading).toBeCloseTo(headingAt(4000), 6);
     expect(snapshot.rawPath.slice(1).map((point) => point.t)).toEqual(planted);
     expect(snapshot.rawPath[8]!.x).toBeCloseTo(blended[8]!.x, 4);
@@ -294,6 +295,7 @@ describe('precomputed steps and headings', () => {
     const snapshot = engine.getSnapshot();
     expect(snapshot.stepCount).toBe(4);
     expect(snapshot.heading).toBe(90);
+    expect(snapshot.gyroOnly).toBeUndefined();
     expect(snapshot.rawPath[1]).toEqual({ x: 0, y: 1, t: 500 });
     expect(snapshot.rawPath[2]).toEqual({ x: 0, y: 2, t: 1000 });
     expect(snapshot.rawPath[3]!.x).toBe(1);
@@ -343,6 +345,7 @@ describe('precomputed steps and headings', () => {
 
     const snapshot = engine.getSnapshot();
     expect(snapshot.heading).toBe(90);
+    expect(snapshot.gyroOnly).toBe(false);
     expect(snapshot.stepCount).toBe(1);
     expect(snapshot.rawPath[1]).toEqual({ x: 0, y: 1, t: 1000 });
   });
@@ -358,6 +361,7 @@ describe('precomputed steps and headings', () => {
 
     const snapshot = engine.getSnapshot();
     expect(snapshot.heading).toBe(90);
+    expect(snapshot.gyroOnly).toBe(true);
     expect(snapshot.rawPath[0]).toEqual({ x: 0, y: 0, t: 0 });
     expect(snapshot.rawPath[1]!.x).toBe(1);
     expect(snapshot.rawPath[1]!.y).toBeCloseTo(0, 12);

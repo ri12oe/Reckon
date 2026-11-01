@@ -36,8 +36,8 @@
  *
  * When the top of the phone, or the current sample's acceleration, is
  * past `LEVEL_MAX_TILT_FROM_HORIZONTAL_DEG` (70° off the horizon), the
- * feed pauses: it pushes no accel, no gyro, and no mag, after one zero
- * yaw rate so the fusion hold does not keep integrating the last turn.
+ * feed pauses: it pushes no accel, no gyro, and no mag, after one yaw
+ * brake so the following gap does not keep integrating the last turn.
  * Tracking resumes once the pose is usable again. Until the first
  * accelerometer sample, the phone is assumed screen-up.
  *
@@ -244,15 +244,20 @@ function observeAccel(
   // Free-fall and any other reading with no direction cannot be a step
   // or a heading fix.
   if (instant === null) {
-    const hold = tracker.level ? { t, yawRate: 0 } : null;
+    const hold = tracker.level ? yawBrake(t) : null;
     tracker.level = false;
     return { accel: null, hold };
   }
   const level = attitudeIsLevel(tracker.down, instant);
-  const hold = tracker.level && !level ? { t, yawRate: 0 } : null;
+  const hold = tracker.level && !level ? yawBrake(t) : null;
   tracker.level = level;
   if (!level) return { accel: null, hold };
   return { accel: accelFromDevice(measurement, t), hold };
+}
+
+/** Not a measured yaw of 0. The pause gap integrates 0 and is not a bias sample. */
+function yawBrake(t: number): GyroSample {
+  return { t, brake: true };
 }
 
 function accelFromDevice(measurement: SensorMeasurement, t: number): AccelSample {

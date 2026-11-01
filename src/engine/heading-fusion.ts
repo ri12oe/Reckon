@@ -26,18 +26,29 @@
  * Streams may be unsynchronized; both are sorted by timestamp.
  *
  * Gyro rate is zero-order held: the rate on a sample applies until the
- * next gyroscope sample. At a shared timestamp the gyro is integrated
- * first, then the magnetometer may correct.
+ * next gyroscope sample. A brake is not a measured yaw of 0: the following
+ * gap integrates 0 and the brake is not a bias sample. At a shared
+ * timestamp the gyro is integrated first, then the magnetometer may correct.
  *
  * Not in this module: step length, path integration, loop-closure drift.
  */
 
-export type GyroSample = {
+/** Radians per second, clockwise, the device measurement. */
+export type YawMeasurement = {
   /** Milliseconds. */
   t: number;
   /** Radians per second, positive clockwise (same sense as heading). */
   yawRate: number;
 };
+
+/** Tilt pause. The following gap integrates 0 and is not a bias sample. */
+export type YawBrake = {
+  /** Milliseconds. */
+  t: number;
+  brake: true;
+};
+
+export type GyroSample = YawMeasurement | YawBrake;
 
 export type MagSample = {
   /** Milliseconds. */
@@ -152,9 +163,13 @@ export function fuseHeading(
   return fused;
 }
 
-type GyroEvent = { t: number; rank: 0; yawRate: number };
+type YawEvent =
+  { t: number; rank: 0; kind: 'measured'; yawRate: number } | { t: number; rank: 0; kind: 'brake' };
 type MagEvent = { t: number; rank: 1; x: number; y: number; z: number };
-type TimedEvent = GyroEvent | MagEvent;
+type TimedEvent = YawEvent | MagEvent;
+
+/** What the zero-order hold is carrying. A brake is not a measured 0. */
+type HeldYaw = { kind: 'brake' } | { kind: 'measured'; degPerSec: number };
 
 type Phase = { kind: 'open' } | { kind: 'rejected' } | { kind: 'live' } | { kind: 'held' };
 
@@ -167,7 +182,7 @@ type MagObs = {
 
 type FusionState = {
   heading: number;
-  yawDegPerSec: number;
+  yaw: HeldYaw;
   /** Clockwise degrees per second subtracted from a measured yaw rate. */
   biasDegPerSec: number;
   /** Raw degrees integrated since the last live correction. Discarded on latch. */
@@ -186,7 +201,7 @@ function createState(initialHeadingDeg: number): FusionState {
   const heading = wrap360(initialHeadingDeg);
   return {
     heading,
-    yawDegPerSec: 0,
+    yaw: { kind: 'measured', degPerSec: 0 },
     biasDegPerSec: 0,
     rawYawAccumDeg: 0,
     lastT: null,
@@ -203,8 +218,13 @@ function collectEvents(gyro: readonly GyroSample[], mag: readonly MagSample[]): 
   const events: TimedEvent[] = [];
 
   for (const sample of gyro) {
-    if (!Number.isFinite(sample.t) || !Number.isFinite(sample.yawRate)) continue;
-    events.push({ t: sample.t, rank: 0, yawRate: sample.yawRate });
+    if (!Number.isFinite(sample.t)) continue;
+    if ('brake' in sample) {
+      events.push({ t: sample.t, rank: 0, kind: 'brake' });
+      continue;
+    }
+    if (!Number.isFinite(sample.yawRate)) continue;
+    events.push({ t: sample.t, rank: 0, kind: 'measured', yawRate: sample.yawRate });
   }
 
   for (const sample of mag) {
@@ -231,15 +251,25 @@ function step(
 ): FusedHeading {
   if (state.lastT !== null && t > state.lastT) {
     const dtSeconds = (t - state.lastT) / 1000;
-    state.heading = wrap360(state.heading + (state.yawDegPerSec - state.biasDegPerSec) * dtSeconds);
-    if (state.phase.kind === 'live') state.rawYawAccumDeg += state.yawDegPerSec * dtSeconds;
+    state.heading = wrap360(
+      state.heading + appliedYawDegPerSec(state.yaw, state.biasDegPerSec) * dtSeconds,
+    );
+    if (state.phase.kind === 'live' && state.yaw.kind === 'measured') {
+      state.rawYawAccumDeg += state.yaw.degPerSec * dtSeconds;
+    }
   }
   state.lastT = t;
 
   let mag: MagEvent | undefined;
   for (const event of group) {
-    if (event.rank === 0) state.yawDegPerSec = (event.yawRate * 180) / Math.PI;
-    else mag = event;
+    if (event.rank !== 0) {
+      mag = event;
+      continue;
+    }
+    state.yaw =
+      event.kind === 'brake'
+        ? { kind: 'brake' }
+        : { kind: 'measured', degPerSec: (event.yawRate * 180) / Math.PI };
   }
 
   let magneticHeading: number | null = null;
@@ -395,6 +425,11 @@ function isJump(state: FusionState, magneticHeading: number, config: HeadingFusi
 
 /** Faster compass motion is a step or a wobble, not a bias sample. Degrees per second. */
 const MAX_BIAS_COMPASS_RATE_DEG_PER_SEC = 30;
+
+function appliedYawDegPerSec(yaw: HeldYaw, biasDegPerSec: number): number {
+  if (yaw.kind === 'brake') return 0;
+  return yaw.degPerSec - biasDegPerSec;
+}
 
 function latch(state: FusionState): void {
   if (state.phase.kind === 'live' || state.phase.kind === 'held') {

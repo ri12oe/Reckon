@@ -20,7 +20,8 @@
  * The shared engine uses that for the static demo walk.
  * `EngineSnapshot.heading` is the course: the latest fused heading, else
  * the latest pushed heading, else the latest step heading, else the
- * configured initial heading (0°).
+ * configured initial heading (0°). `gyroOnly` comes from that same fused
+ * sample, and is omitted when the heading did not come from fusion.
  *
  * Corridor snap is on unless `drift.corridor` says otherwise. Loop closure
  * and landmark tags are off until the caller asks. Landmark tags also
@@ -38,6 +39,7 @@ import {
 } from '@/engine/drift-correction';
 import {
   fuseHeading,
+  type FusedHeading,
   type GyroSample,
   type HeadingFusionConfig,
   type MagSample,
@@ -133,7 +135,10 @@ type DriftState = {
   pins: PinRecord[];
 };
 
-type Course = { kind: 'series'; samples: HeadingSample[] } | { kind: 'constant'; heading: number };
+type Course =
+  | { kind: 'fused'; samples: HeadingSample[]; heading: number; gyroOnly: boolean }
+  | { kind: 'pushed'; samples: HeadingSample[] }
+  | { kind: 'constant'; heading: number };
 
 export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngine {
   const stepDetectorConfig = config?.stepDetector ? { ...config.stepDetector } : undefined;
@@ -173,17 +178,20 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   function headingCourse(): Course {
     if (gyros.length > 0 || mags.length > 0) {
       const fused = fuseHeading(gyros, mags, headingFusionConfig);
-      if (fused.length > 0) {
+      const latest = latestFusedSample(fused);
+      if (latest) {
         return {
-          kind: 'series',
+          kind: 'fused',
           samples: fused.map((sample) => ({ t: sample.t, heading: sample.heading })),
+          heading: latest.heading,
+          gyroOnly: latest.gyroOnly,
         };
       }
     }
     if (
       headingSamples.some((sample) => Number.isFinite(sample.t) && Number.isFinite(sample.heading))
     ) {
-      return { kind: 'series', samples: headingSamples.map(copyHeading) };
+      return { kind: 'pushed', samples: headingSamples.map(copyHeading) };
     }
     return { kind: 'constant', heading: resolvedInitialHeading(headingFusionConfig) };
   }
@@ -193,7 +201,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     const course = headingCourse();
     const rawPath = integratePath(
       steps,
-      course.kind === 'series' ? course.samples : course.heading,
+      course.kind === 'constant' ? course.heading : course.samples,
       {
         stepLength: stepLengthM,
         originX,
@@ -202,13 +210,15 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       },
     );
     const corrected = correctDrift(rawPath, driftOptions(drift));
-    return {
+    const snapshot: EngineSnapshot = {
       rawPath: corrected.raw,
       correctedPath: corrected.corrected,
       stepCount: countCalibrationSteps(steps),
-      heading: snapshotHeading(course, steps, headingFusionConfig),
+      heading: snapshotHeading(course, steps),
       pins: resolvePins(drift, corrected.corrected),
     };
+    if (course.kind === 'fused') snapshot.gyroOnly = course.gyroOnly;
+    return snapshot;
   }
 
   const engine: LiveFloorwalkerEngine = {
@@ -218,8 +228,8 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       touch();
     },
     pushGyro(sample) {
-      gyros.push({ t: sample.t, yawRate: sample.yawRate });
-      if (Number.isFinite(sample.t) && Number.isFinite(sample.yawRate)) accepted = true;
+      gyros.push(copyGyro(sample));
+      if (gyroAccepted(sample)) accepted = true;
       touch();
     },
     pushMag(sample) {
@@ -457,15 +467,25 @@ function pinsForTags(tags: readonly LandmarkTag[]): PinRecord[] {
   return pins;
 }
 
-function snapshotHeading(
-  course: Course,
-  steps: readonly PathStep[],
-  headingFusion: Partial<HeadingFusionConfig> | undefined,
-): number {
-  if (course.kind === 'series') return latestSampleHeading(course.samples);
+function snapshotHeading(course: Course, steps: readonly PathStep[]): number {
+  if (course.kind === 'fused') return wrap360(course.heading);
+  if (course.kind === 'pushed') return latestSampleHeading(course.samples);
   const fromStep = latestStepHeading(steps);
   if (fromStep !== null) return fromStep;
-  return resolvedInitialHeading(headingFusion);
+  return course.heading;
+}
+
+function latestFusedSample(samples: readonly FusedHeading[]): FusedHeading | null {
+  let bestT = Number.NEGATIVE_INFINITY;
+  let best: FusedHeading | null = null;
+  for (const sample of samples) {
+    if (!Number.isFinite(sample.t) || !Number.isFinite(sample.heading)) continue;
+    if (!best || sample.t >= bestT) {
+      best = sample;
+      bestT = sample.t;
+    }
+  }
+  return best;
 }
 
 function latestSampleHeading(samples: readonly HeadingSample[]): number {
@@ -526,6 +546,17 @@ function copyHeading(sample: HeadingSample): HeadingSample {
   return { t: sample.t, heading: sample.heading };
 }
 
+function copyGyro(sample: GyroSample): GyroSample {
+  if ('brake' in sample) return { t: sample.t, brake: true };
+  return { t: sample.t, yawRate: sample.yawRate };
+}
+
+function gyroAccepted(sample: GyroSample): boolean {
+  if (!Number.isFinite(sample.t)) return false;
+  if ('brake' in sample) return true;
+  return Number.isFinite(sample.yawRate);
+}
+
 function copyTag(tag: LandmarkTag): LandmarkTag {
   return { id: tag.id, pathIndex: tag.pathIndex };
 }
@@ -555,13 +586,15 @@ function copyLoopTarget(
 }
 
 function cloneSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
-  return {
+  const copy: EngineSnapshot = {
     rawPath: snapshot.rawPath.map(copyPoint),
     correctedPath: snapshot.correctedPath.map(copyPoint),
     stepCount: snapshot.stepCount,
     heading: snapshot.heading,
     pins: snapshot.pins.map((pin) => ({ id: pin.id, x: pin.x, y: pin.y, label: pin.label })),
   };
+  if (snapshot.gyroOnly !== undefined) copy.gyroOnly = snapshot.gyroOnly;
+  return copy;
 }
 
 function copyPoint(point: PathPoint): PathPoint {
