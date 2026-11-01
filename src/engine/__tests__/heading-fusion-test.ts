@@ -98,6 +98,7 @@ describe('heading fusion defaults', () => {
       recoverHoldMs: 400,
       initialHeadingDeg: 0,
       baselineTauSeconds: 10,
+      biasTauSeconds: 5,
     });
   });
 });
@@ -196,7 +197,7 @@ describe('fuseHeading', () => {
     expect(settled.every((sample) => !sample.interference && !sample.gyroOnly)).toBe(true);
   });
 
-  test('an 80° compass jump holds 0.0°; trusting it would pull the heading to 59.19°', () => {
+  test('a stable 80° compass reacquires after the hold and blends toward 80°', () => {
     const times = clock(0, 5000);
     const gyro = gyroAt(times, 0);
     const mag = magAt(times, (t) => (t >= 1000 && t <= 3000 ? field(80) : north()));
@@ -210,20 +211,24 @@ describe('fuseHeading', () => {
       interference: false,
       gyroOnly: false,
     });
-    expect(at(held, 2000)).toMatchObject({
-      heading: 0,
-      interference: true,
-      gyroOnly: true,
-    });
+    expect(at(held, 1380)).toMatchObject({ heading: 0, interference: true, gyroOnly: true });
+    expect(at(held, 1400).heading).toBeCloseTo(19.5373, 4);
+    expect(at(held, 1400)).toMatchObject({ interference: false, gyroOnly: false });
+    expect(at(held, 2000).heading).toBeCloseTo(39.4706, 4);
     expect(at(held, 2000).magneticHeading).toBeCloseTo(80, 6);
-    expect(at(held, 3000)).toMatchObject({ heading: 0, interference: true, gyroOnly: true });
-    expect(at(held, 3400)).toMatchObject({ heading: 0, interference: true, gyroOnly: true });
+    expect(at(held, 2000)).toMatchObject({ interference: false, gyroOnly: false });
+    expect(at(held, 3000).heading).toBeCloseTo(59.1915, 4);
+    expect(at(held, 3000)).toMatchObject({ interference: false, gyroOnly: false });
+    expect(at(held, 3400).heading).toBeCloseTo(59.1915, 4);
+    expect(at(held, 3400)).toMatchObject({ interference: true, gyroOnly: true });
+    expect(at(held, 3420).heading).toBeCloseTo(44.736, 4);
     expect(at(held, 3420)).toMatchObject({
-      heading: 0,
       magneticHeading: 0,
       interference: false,
       gyroOnly: false,
     });
+    expect(at(held, 4000).heading).toBeCloseTo(30.3899, 4);
+    expect(at(held, 4000)).toMatchObject({ interference: false, gyroOnly: false });
     expect(at(trusted, 3000).heading).toBeCloseTo(59.1915, 4);
     expect(at(trusted, 3000).interference).toBe(false);
   });
@@ -289,7 +294,7 @@ describe('fuseHeading', () => {
     expect(at(fused, 4000).interference).toBe(false);
   });
 
-  test('3.0°/s for 10.0 s: no mag or 200 µT ends at 30.0°; a healthy field ends at 4.46°', () => {
+  test('3.0°/s for 10.0 s: no mag or 200 µT ends at 30.0°; a healthy field ends near 0.86°', () => {
     const times = clock(0, 10000);
     const gyro = gyroAt(times, 3);
     const gyroOnly = fuseHeading(gyro, []);
@@ -318,11 +323,11 @@ describe('fuseHeading', () => {
       gyroOnly: false,
       magnitudeUt: 50,
     });
-    expect(at(corrected, 10000).heading).toBeCloseTo(4.46438, 5);
+    expect(at(corrected, 10000).heading).toBeCloseTo(0.8578, 3);
     expect(at(corrected, 10000)).toMatchObject({ interference: false, gyroOnly: false });
   });
 
-  test('magnetometer at 10 Hz still bounds the same 3.0°/s bias, to 4.35° at 10.0 s', () => {
+  test('magnetometer at 10 Hz still bounds the same 3.0°/s bias, near 0.84° at 10.0 s', () => {
     const gyroTimes = clock(0, 10000, 20);
     const magTimes = clock(0, 10000, 100);
     const fused = fuseHeading(gyroAt(gyroTimes, 3), magAt(magTimes, north()));
@@ -337,7 +342,7 @@ describe('fuseHeading', () => {
       gyroOnly: false,
       interference: false,
     });
-    expect(at(fused, 10000).heading).toBeCloseTo(4.34613, 4);
+    expect(at(fused, 10000).heading).toBeCloseTo(0.8419, 3);
     expect(at(fused, 10000).magneticHeading).toBe(0);
   });
 
@@ -397,6 +402,28 @@ describe('fuseHeading', () => {
     expect(gyro).toEqual(gyroBefore);
     expect(mag).toEqual(magBefore);
     expect(at(forward, 2000).heading).toBeCloseTo(45, 6);
+  });
+
+  test('a tilt brake holds the heading; a measured 0 rad/s integrates minus the bias', () => {
+    const times = clock(0, 10000);
+    const gyro = gyroAt(times, 3);
+    const mag = magAt(times, north());
+    const brake = fuseHeading(
+      [...gyro, { t: 10000, brake: true }, { t: 12000, yawRate: yaw(90) }],
+      mag,
+    );
+    const still = fuseHeading(
+      [...gyro, { t: 10000, yawRate: 0 }, { t: 12000, yawRate: yaw(90) }],
+      mag,
+    );
+    const bias = 3 * (1 - Math.exp(-10 / 5));
+    const wrapped = (deg: number) => {
+      const turn = ((deg % 360) + 360) % 360;
+      return turn === 0 ? 0 : turn;
+    };
+
+    expect(at(brake, 12000).heading).toBeCloseTo(at(brake, 10000).heading, 6);
+    expect(at(still, 12000).heading).toBeCloseTo(wrapped(at(still, 10000).heading - bias * 2), 4);
   });
 });
 

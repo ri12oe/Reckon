@@ -62,6 +62,8 @@ export type {
   GyroSample,
   HeadingFusionConfig,
   MagSample,
+  YawBrake,
+  YawMeasurement,
 } from '@/engine/heading-fusion';
 
 export {

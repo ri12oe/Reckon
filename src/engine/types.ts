@@ -28,6 +28,12 @@ export type EngineSnapshot = {
   stepCount: number;
   heading: number;
   pins: Pin[];
+  /**
+   * Set when `heading` is the latest fused sample.
+   * True while that sample is gyro propagation. Omitted when the heading
+   * did not come from fusion.
+   */
+  gyroOnly?: boolean;
 };
 
 export type FloorwalkerEngine = {

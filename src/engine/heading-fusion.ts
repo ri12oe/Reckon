@@ -9,12 +9,7 @@
  * 2. Blend the magnetometer heading with time constant `tauSeconds`.
  *    The magnetometer is absolute and noisy.
  * 3. When the field is interfered, stop the blend and trust the gyro
- *    until the magnetometer is trustworthy again for `recoverHoldMs`.
- *
- * Interference is any of:
- * - magnitude outside the Earth-field window, or too far from the trusted baseline
- * - a heading jump the gyroscope did not measure
- * - a sustained disagreement larger than `reacquireMaxDeg`
+ *    until a magnetometer window of `recoverHoldMs` is clean and stable.
  *
  * The first in-range magnetometer sample snaps the heading. The recovery
  * hold applies only after that fix has been lost.
@@ -30,12 +25,21 @@
  * Not in this module: step length, path integration, loop-closure drift.
  */
 
-export type GyroSample = {
+export type YawMeasurement = {
   /** Milliseconds. */
   t: number;
   /** Radians per second, positive clockwise (same sense as heading). */
   yawRate: number;
 };
+
+/** Tilt pause. The following gap integrates 0 and is not a bias sample. */
+export type YawBrake = {
+  /** Milliseconds. */
+  t: number;
+  brake: true;
+};
+
+export type GyroSample = YawMeasurement | YawBrake;
 
 export type MagSample = {
   /** Milliseconds. */
@@ -86,16 +90,18 @@ export type HeadingFusionConfig = {
    */
   jumpThresholdDeg: number;
   /**
-   * While tracking, or when trying to reacquire, a magnetometer heading
-   * farther than this from the gyro heading is not trusted.
+   * While the recovery window is not ready, a magnetometer heading farther
+   * than this from the fused heading is not trusted.
    */
   reacquireMaxDeg: number;
-  /** Clean magnetometer time required before blending again, milliseconds. */
+  /** Milliseconds of clean, stable magnetometer samples required to leave a hold. */
   recoverHoldMs: number;
   /** Heading used until the first trusted magnetometer sample, degrees. */
   initialHeadingDeg: number;
   /** Time constant for the trusted magnitude baseline, seconds. */
   baselineTauSeconds: number;
+  /** Low-pass time constant for gyro bias, seconds. */
+  biasTauSeconds: number;
 };
 
 export const DEFAULT_HEADING_FUSION_CONFIG: HeadingFusionConfig = {
@@ -109,6 +115,7 @@ export const DEFAULT_HEADING_FUSION_CONFIG: HeadingFusionConfig = {
   recoverHoldMs: 400,
   initialHeadingDeg: 0,
   baselineTauSeconds: 10,
+  biasTauSeconds: 5,
 };
 
 /** |B| in microtesla. */
@@ -147,36 +154,49 @@ export function fuseHeading(
   return fused;
 }
 
-type GyroEvent = { t: number; rank: 0; yawRate: number };
+type YawEvent =
+  { t: number; rank: 0; kind: 'measured'; yawRate: number } | { t: number; rank: 0; kind: 'brake' };
 type MagEvent = { t: number; rank: 1; x: number; y: number; z: number };
-type TimedEvent = GyroEvent | MagEvent;
+type TimedEvent = YawEvent | MagEvent;
+
+type HeldYaw = { kind: 'brake' } | { kind: 'measured'; degPerSec: number };
+
+type Phase = { kind: 'open' } | { kind: 'rejected' } | { kind: 'live' } | { kind: 'held' };
+
+type MagObs = {
+  t: number;
+  magnitudeUt: number;
+  headingDeg: number | null;
+};
 
 type FusionState = {
   heading: number;
-  yawDegPerSec: number;
+  yaw: HeldYaw;
+  biasDegPerSec: number;
+  rawYawAccumDeg: number;
   lastT: number | null;
-  hasFix: boolean;
-  interfered: boolean;
-  cleanSince: number | null;
+  phase: Phase;
   baselineUt: number | null;
   lastMagHeading: number | null;
   headingMark: number;
   lastTrustedT: number | null;
+  recentMag: MagObs[];
 };
 
 function createState(initialHeadingDeg: number): FusionState {
   const heading = wrap360(initialHeadingDeg);
   return {
     heading,
-    yawDegPerSec: 0,
+    yaw: { kind: 'measured', degPerSec: 0 },
+    biasDegPerSec: 0,
+    rawYawAccumDeg: 0,
     lastT: null,
-    hasFix: false,
-    interfered: false,
-    cleanSince: null,
+    phase: { kind: 'open' },
     baselineUt: null,
     lastMagHeading: null,
     headingMark: heading,
     lastTrustedT: null,
+    recentMag: [],
   };
 }
 
@@ -184,8 +204,13 @@ function collectEvents(gyro: readonly GyroSample[], mag: readonly MagSample[]): 
   const events: TimedEvent[] = [];
 
   for (const sample of gyro) {
-    if (!Number.isFinite(sample.t) || !Number.isFinite(sample.yawRate)) continue;
-    events.push({ t: sample.t, rank: 0, yawRate: sample.yawRate });
+    if (!Number.isFinite(sample.t)) continue;
+    if ('brake' in sample) {
+      events.push({ t: sample.t, rank: 0, kind: 'brake' });
+      continue;
+    }
+    if (!Number.isFinite(sample.yawRate)) continue;
+    events.push({ t: sample.t, rank: 0, kind: 'measured', yawRate: sample.yawRate });
   }
 
   for (const sample of mag) {
@@ -212,14 +237,25 @@ function step(
 ): FusedHeading {
   if (state.lastT !== null && t > state.lastT) {
     const dtSeconds = (t - state.lastT) / 1000;
-    state.heading = wrap360(state.heading + state.yawDegPerSec * dtSeconds);
+    state.heading = wrap360(
+      state.heading + appliedYawDegPerSec(state.yaw, state.biasDegPerSec) * dtSeconds,
+    );
+    if (state.phase.kind === 'live' && state.yaw.kind === 'measured') {
+      state.rawYawAccumDeg += state.yaw.degPerSec * dtSeconds;
+    }
   }
   state.lastT = t;
 
   let mag: MagEvent | undefined;
   for (const event of group) {
-    if (event.rank === 0) state.yawDegPerSec = (event.yawRate * 180) / Math.PI;
-    else mag = event;
+    if (event.rank !== 0) {
+      mag = event;
+      continue;
+    }
+    state.yaw =
+      event.kind === 'brake'
+        ? { kind: 'brake' }
+        : { kind: 'measured', degPerSec: (event.yawRate * 180) / Math.PI };
   }
 
   let magneticHeading: number | null = null;
@@ -233,8 +269,8 @@ function step(
   return {
     t,
     heading: state.heading,
-    gyroOnly: !state.hasFix || state.interfered,
-    interference: state.interfered,
+    gyroOnly: state.phase.kind !== 'live',
+    interference: state.phase.kind === 'held' || state.phase.kind === 'rejected',
     magneticHeading,
     magnitudeUt,
   };
@@ -253,17 +289,38 @@ function applyMagnetometer(
     magneticHeading !== null &&
     horizontal >= config.minHorizontalUt &&
     Number.isFinite(magneticHeading);
+
+  state.recentMag.push({
+    t,
+    magnitudeUt,
+    headingDeg: headingUsable ? magneticHeading : null,
+  });
+  while (
+    state.recentMag.length > 0 &&
+    isOlderThanHold(state.recentMag[0]!.t, t, config.recoverHoldMs)
+  ) {
+    state.recentMag.shift();
+  }
+
   const magnitudeBad = magnitudeIsBad(magnitudeUt, state.baselineUt, config);
 
   if (!headingUsable) {
-    if (magnitudeBad) latchInterference(state);
-    else if (state.interfered) state.cleanSince = null;
+    if (magnitudeBad) latch(state);
     return { magneticHeading, magnitudeUt };
   }
 
-  if (!state.hasFix) {
+  if (state.phase.kind === 'open' || state.phase.kind === 'rejected') {
     if (!magnitudeBad) acquire(state, t, magneticHeading, magnitudeUt);
-    else latchInterference(state);
+    else state.phase = { kind: 'rejected' };
+    return { magneticHeading, magnitudeUt };
+  }
+
+  if (recoveryReady(state.recentMag, state.baselineUt, config)) {
+    const wasLive = state.phase.kind === 'live';
+    state.phase = { kind: 'live' };
+    if (wasLive) learnBias(state, t, magneticHeading, config);
+    const innovation = wrap180(magneticHeading - state.heading);
+    correct(state, t, magneticHeading, magnitudeUt, innovation, config);
     return { magneticHeading, magnitudeUt };
   }
 
@@ -273,20 +330,41 @@ function applyMagnetometer(
   const disagrees = innovationAbs > config.reacquireMaxDeg;
 
   if (magnitudeBad || sudden || disagrees) {
-    latchInterference(state);
-  } else if (state.interfered) {
-    if (state.cleanSince === null) state.cleanSince = t;
-    if (t - state.cleanSince >= config.recoverHoldMs) {
-      state.interfered = false;
-      state.cleanSince = null;
+    if (state.phase.kind === 'live') {
+      state.phase = { kind: 'held' };
+      state.rawYawAccumDeg = 0;
     }
+    return { magneticHeading, magnitudeUt };
   }
 
-  if (!state.interfered && !magnitudeBad && !sudden) {
+  if (state.phase.kind === 'live') {
+    learnBias(state, t, magneticHeading, config);
     correct(state, t, magneticHeading, magnitudeUt, innovation, config);
   }
 
   return { magneticHeading, magnitudeUt };
+}
+
+function isOlderThanHold(sampleT: number, now: number, recoverHoldMs: number): boolean {
+  return sampleT < now - recoverHoldMs;
+}
+
+function recoveryReady(
+  recentMag: readonly MagObs[],
+  baselineUt: number | null,
+  config: HeadingFusionConfig,
+): boolean {
+  const first = recentMag[0];
+  const last = recentMag[recentMag.length - 1];
+  if (!first || !last || last.headingDeg === null) return false;
+  if (last.t - first.t < config.recoverHoldMs) return false;
+
+  for (const obs of recentMag) {
+    if (obs.headingDeg === null) return false;
+    if (Math.abs(wrap180(obs.headingDeg - last.headingDeg)) > config.jumpThresholdDeg) return false;
+    if (magnitudeIsBad(obs.magnitudeUt, baselineUt, config)) return false;
+  }
+  return true;
 }
 
 function acquire(
@@ -296,9 +374,8 @@ function acquire(
   magnitudeUt: number,
 ): void {
   state.heading = magneticHeading;
-  state.hasFix = true;
-  state.interfered = false;
-  state.cleanSince = null;
+  state.phase = { kind: 'live' };
+  state.rawYawAccumDeg = 0;
   state.baselineUt = magnitudeUt;
   state.lastMagHeading = magneticHeading;
   state.headingMark = magneticHeading;
@@ -336,9 +413,40 @@ function isJump(state: FusionState, magneticHeading: number, config: HeadingFusi
   return Math.abs(wrap180(magDelta - gyroDelta)) > config.jumpThresholdDeg;
 }
 
-function latchInterference(state: FusionState): void {
-  state.interfered = true;
-  state.cleanSince = null;
+const MAX_BIAS_COMPASS_RATE_DEG_PER_SEC = 30;
+
+function appliedYawDegPerSec(yaw: HeldYaw, biasDegPerSec: number): number {
+  if (yaw.kind === 'brake') return 0;
+  return yaw.degPerSec - biasDegPerSec;
+}
+
+function latch(state: FusionState): void {
+  if (state.phase.kind === 'live' || state.phase.kind === 'held') {
+    state.phase = { kind: 'held' };
+    state.rawYawAccumDeg = 0;
+    return;
+  }
+  state.phase = { kind: 'rejected' };
+}
+
+function learnBias(
+  state: FusionState,
+  t: number,
+  magneticHeading: number,
+  config: HeadingFusionConfig,
+): void {
+  if (state.lastTrustedT === null || state.lastMagHeading === null) return;
+  const dt = (t - state.lastTrustedT) / 1000;
+  if (!(dt > 0)) return;
+  const compassDelta = wrap180(magneticHeading - state.lastMagHeading);
+  if (Math.abs(compassDelta) / dt > MAX_BIAS_COMPASS_RATE_DEG_PER_SEC) {
+    state.rawYawAccumDeg = 0;
+    return;
+  }
+  const compassRate = compassDelta / dt;
+  const biasObs = state.rawYawAccumDeg / dt - compassRate;
+  state.biasDegPerSec += blendAlpha(dt, config.biasTauSeconds) * (biasObs - state.biasDegPerSec);
+  state.rawYawAccumDeg = 0;
 }
 
 function magnitudeIsBad(
@@ -389,6 +497,7 @@ function resolveConfig(config?: Partial<HeadingFusionConfig>): HeadingFusionConf
     recoverHoldMs: nonNegative(config?.recoverHoldMs, defaults.recoverHoldMs),
     initialHeadingDeg: wrap360(finiteOr(config?.initialHeadingDeg, defaults.initialHeadingDeg)),
     baselineTauSeconds: positive(config?.baselineTauSeconds, defaults.baselineTauSeconds),
+    biasTauSeconds: positive(config?.biasTauSeconds, defaults.biasTauSeconds),
   };
 }
 

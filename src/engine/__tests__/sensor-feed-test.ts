@@ -10,6 +10,7 @@ import {
   startSensors,
   stopSensors,
   startSensorFeed,
+  type GyroSample,
   type MotionSensor,
   type MotionSensors,
   type SensorMeasurement,
@@ -127,7 +128,7 @@ describe('sensor frame conversion', () => {
   test('maps g, rad/s, and µT into engine samples with millisecond timestamps', async () => {
     const sensors = motionSensors();
     const accel: { t: number; x: number; y: number; z: number }[] = [];
-    const gyro: { t: number; yawRate: number }[] = [];
+    const gyro: GyroSample[] = [];
     const mag: { t: number; x: number; y: number; z: number }[] = [];
     const feed = await startSensorFeed(
       {
