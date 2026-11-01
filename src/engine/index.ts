@@ -1,3 +1,4 @@
+import { calibrationDatabaseOpen, readStepLength } from '@/db/calibration';
 import {
   createLiveEngine,
   type LandmarkPin,
@@ -12,23 +13,53 @@ import type { StartSensorFeedOptions } from '@/engine/sensor-feed';
  * Until the first finite sample, `getSnapshot` is the static demo from
  * `mockEngine`, which stays exported. Tests build an isolated engine
  * with `createLiveEngine()`.
+ *
+ * A saved step length is applied once the database is open. Web opens
+ * that database after the first render, so a later `getEngine` call
+ * picks the length up.
  */
-const liveEngine = createLiveEngine({ emptySnapshot: mockEngine.getSnapshot() });
+let liveEngine: LiveFloorwalkerEngine | null = null;
+let bootedWithDatabase = false;
+
+function storedStepLengthM(): number | undefined {
+  if (!calibrationDatabaseOpen()) return undefined;
+  return readStepLength()?.stepLengthM;
+}
+
+function bootConfig(): LiveEngineConfig {
+  const stepLengthM = storedStepLengthM();
+  return {
+    emptySnapshot: mockEngine.getSnapshot(),
+    ...(stepLengthM !== undefined ? { stepLengthM } : {}),
+  };
+}
 
 export function getEngine(): LiveFloorwalkerEngine {
-  return liveEngine;
+  const existing = liveEngine;
+  if (existing) {
+    if (!bootedWithDatabase && calibrationDatabaseOpen()) {
+      const stepLengthM = storedStepLengthM();
+      if (stepLengthM !== undefined) existing.setStepLength(stepLengthM);
+      bootedWithDatabase = true;
+    }
+    return existing;
+  }
+  const created = createLiveEngine(bootConfig());
+  liveEngine = created;
+  bootedWithDatabase = calibrationDatabaseOpen();
+  return created;
 }
 
 export function getLiveEngine(): LiveFloorwalkerEngine {
-  return liveEngine;
+  return getEngine();
 }
 
 export function startSensors(options?: StartSensorFeedOptions): Promise<void> {
-  return liveEngine.startSensors(options);
+  return getEngine().startSensors(options);
 }
 
 export function stopSensors(): void {
-  liveEngine.stopSensors();
+  liveEngine?.stopSensors();
 }
 
 export { createLiveEngine };
