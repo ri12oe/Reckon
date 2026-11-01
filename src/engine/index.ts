@@ -130,7 +130,7 @@ export type {
   LandmarkTag,
 } from '@/engine/drift-correction';
 
-export { mockEngine } from '@/engine/mock-engine';
+export { emptyRecording, isCannedDemo, mockEngine } from '@/engine/mock-engine';
 
 export {
   FLAT_SCREEN_UP_DOWN,

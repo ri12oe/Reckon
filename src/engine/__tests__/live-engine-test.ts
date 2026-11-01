@@ -1,4 +1,4 @@
-import { getEngine, mockEngine } from '@/engine';
+import { emptyRecording, getEngine, mockEngine } from '@/engine';
 import { fuseHeading, type GyroSample, type MagSample } from '@/engine/heading-fusion';
 import { createLiveEngine } from '@/engine/live-engine';
 import { integratePath } from '@/engine/path-integration';
@@ -596,6 +596,41 @@ describe('drift correction on the live path', () => {
     engine.reset();
     expect(engine.isRecalled()).toBe(false);
     expect(engine.getSnapshot()).toEqual(demo);
+  });
+
+  test('snapshotForSave is empty during the demo and follows a real walk', () => {
+    const demo = mockEngine.getSnapshot();
+    const engine = createLiveEngine({ emptySnapshot: demo });
+    expect(engine.getSnapshot().stepCount).toBe(12);
+    expect(engine.getSnapshot().correctedPath).toHaveLength(7);
+    expect(engine.snapshotForSave()).toEqual(emptyRecording());
+    expect(engine.sensorsActive()).toBe(false);
+
+    engine.pushAccel({ t: 0, x: 0, y: 0, z: 9.8 });
+    const live = engine.getSnapshot();
+    expect(live).not.toEqual(demo);
+    expect(engine.snapshotForSave()).toEqual(live);
+
+    const saved: EngineSnapshot = {
+      rawPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 1, y: 0, t: 500 },
+      ],
+      correctedPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 1, y: 0, t: 500 },
+      ],
+      stepCount: 1,
+      heading: 90,
+      pins: [],
+    };
+    engine.recallSnapshot(saved);
+    expect(engine.snapshotForSave().stepCount).toBe(1);
+    expect(engine.snapshotForSave().correctedPath).toHaveLength(2);
+
+    engine.recallSnapshot(demo);
+    expect(engine.getSnapshot()).toEqual(demo);
+    expect(engine.snapshotForSave()).toEqual(emptyRecording());
   });
 });
 

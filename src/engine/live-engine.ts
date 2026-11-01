@@ -43,6 +43,7 @@ import {
   type HeadingFusionConfig,
   type MagSample,
 } from '@/engine/heading-fusion';
+import { emptyRecording, isCannedDemo } from '@/engine/mock-engine';
 import {
   DEFAULT_STEP_LENGTH_M,
   integratePath,
@@ -118,8 +119,10 @@ export type LiveFloorwalkerEngine = FloorwalkerEngine & {
   recallSnapshot(snapshot: EngineSnapshot): void;
   clearRecall(): void;
   isRecalled(): boolean;
+  snapshotForSave(): EngineSnapshot;
   reset(): void;
   getStepLength(): number;
+  sensorsActive(): boolean;
   startSensors(options?: StartSensorFeedOptions): Promise<void>;
   stopSensors(): void;
 };
@@ -333,6 +336,14 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       if (!accepted && emptySnapshot) return cloneSnapshot(emptySnapshot);
       cached ??= compute();
       return cloneSnapshot(cached);
+    },
+    snapshotForSave() {
+      const shown = engine.getSnapshot();
+      if ((!accepted && !recalled) || isCannedDemo(shown)) return emptyRecording();
+      return shown;
+    },
+    sensorsActive() {
+      return feed !== null || starting !== null;
     },
     startSensors(sensorOptions) {
       if (feed) return Promise.resolve();

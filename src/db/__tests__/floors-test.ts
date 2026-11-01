@@ -6,6 +6,7 @@ import {
   type SqlExecutor,
 } from '@/db/floors';
 import { FLOOR_SCHEMA } from '@/db/schema';
+import { mockEngine } from '@/engine/mock-engine';
 import type { EngineSnapshot } from '@/engine/types';
 
 type SqliteStatement = {
@@ -145,6 +146,32 @@ function behavesLikeFloorStore(name: string, open: () => FloorStore | Promise<Fl
       expect(doc.createdAt).toBe(saved.createdAt);
       expect(doc.snapshot).toEqual(sample());
       expect(JSON.parse(JSON.stringify(doc))).toEqual(doc);
+    });
+
+    test('stores the canned demo as an empty recording', async () => {
+      const store = await open();
+      const demo = mockEngine.getSnapshot();
+      const saved = store.save({
+        buildingName: 'North Hall',
+        floorName: 'Level 1',
+        snapshot: demo,
+      });
+
+      expect(demo.stepCount).toBe(12);
+      expect(demo.correctedPath).toHaveLength(7);
+      expect(demo.pins).toHaveLength(2);
+      expect(saved.stepCount).toBe(0);
+      expect(saved.pinCount).toBe(0);
+      expect(saved.pointCount).toBe(1);
+      expect(saved.heading).toBe(0);
+      expect(saved.snapshot).toEqual({
+        rawPath: [{ x: 0, y: 0, t: 0 }],
+        correctedPath: [{ x: 0, y: 0, t: 0 }],
+        stepCount: 0,
+        heading: 0,
+        pins: [],
+      });
+      expect(store.get(saved.id)?.snapshot.stepCount).toBe(0);
     });
   });
 }

@@ -1,4 +1,5 @@
 import { FLOOR_SCHEMA } from '@/db/schema';
+import { emptyRecording, isCannedDemo } from '@/engine/mock-engine';
 import type { EngineSnapshot, PathPoint, Pin } from '@/engine/types';
 
 const MAX_NAME_LENGTH = 80;
@@ -268,7 +269,7 @@ function prepareSave(input: SaveFloorInput, now: () => number) {
   return {
     buildingName: cleanName(input.buildingName, 'Building'),
     floorName: cleanName(input.floorName, 'Floor'),
-    snapshot: cloneSnapshot(input.snapshot),
+    snapshot: recordingForSave(input.snapshot),
     createdAt: now(),
   };
 }
@@ -367,6 +368,11 @@ function readPin(row: PinRow): Pin {
 
 function cloneStored(floor: StoredFloor): StoredFloor {
   return { ...floor, snapshot: cloneSnapshot(floor.snapshot) };
+}
+
+function recordingForSave(snapshot: EngineSnapshot): EngineSnapshot {
+  if (isCannedDemo(snapshot)) return emptyRecording();
+  return cloneSnapshot(snapshot);
 }
 
 function cloneSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
