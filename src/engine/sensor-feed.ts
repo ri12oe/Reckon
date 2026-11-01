@@ -36,8 +36,7 @@
  *
  * When the top of the phone, or the current sample's acceleration, is
  * past `LEVEL_MAX_TILT_FROM_HORIZONTAL_DEG` (70° off the horizon), the
- * feed pauses: it pushes no accel, no gyro, and no mag, after one yaw
- * brake so the following gap does not keep integrating the last turn.
+ * feed pauses and pushes no accel, no gyro, and no mag.
  * Tracking resumes once the pose is usable again. Until the first
  * accelerometer sample, the phone is assumed screen-up.
  *
@@ -255,7 +254,6 @@ function observeAccel(
   return { accel: accelFromDevice(measurement, t), hold };
 }
 
-/** Not a measured yaw of 0. The pause gap integrates 0 and is not a bias sample. */
 function yawBrake(t: number): GyroSample {
   return { t, brake: true };
 }

@@ -11,13 +11,6 @@
  * 3. When the field is interfered, stop the blend and trust the gyro
  *    until a magnetometer window of `recoverHoldMs` is clean and stable.
  *
- * Interference is a bad magnitude, or a jump or a disagreement with the
- * gyro while that window is not ready. The window is a property of the
- * magnetometer: every kept sample is magnitude-clean and within
- * `jumpThresholdDeg` of the newest heading. Gyro disagreement cannot
- * veto it. A ready window leaves the hold and blends, even when the
- * compass still disagrees with the gyro by more than `reacquireMaxDeg`.
- *
  * The first in-range magnetometer sample snaps the heading. The recovery
  * hold applies only after that fix has been lost.
  *
@@ -26,14 +19,12 @@
  * Streams may be unsynchronized; both are sorted by timestamp.
  *
  * Gyro rate is zero-order held: the rate on a sample applies until the
- * next gyroscope sample. A brake is not a measured yaw of 0: the following
- * gap integrates 0 and the brake is not a bias sample. At a shared
- * timestamp the gyro is integrated first, then the magnetometer may correct.
+ * next gyroscope sample. At a shared timestamp the gyro is integrated
+ * first, then the magnetometer may correct.
  *
  * Not in this module: step length, path integration, loop-closure drift.
  */
 
-/** Radians per second, clockwise, the device measurement. */
 export type YawMeasurement = {
   /** Milliseconds. */
   t: number;
@@ -168,7 +159,6 @@ type YawEvent =
 type MagEvent = { t: number; rank: 1; x: number; y: number; z: number };
 type TimedEvent = YawEvent | MagEvent;
 
-/** What the zero-order hold is carrying. A brake is not a measured 0. */
 type HeldYaw = { kind: 'brake' } | { kind: 'measured'; degPerSec: number };
 
 type Phase = { kind: 'open' } | { kind: 'rejected' } | { kind: 'live' } | { kind: 'held' };
@@ -176,16 +166,13 @@ type Phase = { kind: 'open' } | { kind: 'rejected' } | { kind: 'live' } | { kind
 type MagObs = {
   t: number;
   magnitudeUt: number;
-  /** Null when the horizontal field does not define a heading. */
   headingDeg: number | null;
 };
 
 type FusionState = {
   heading: number;
   yaw: HeldYaw;
-  /** Clockwise degrees per second subtracted from a measured yaw rate. */
   biasDegPerSec: number;
-  /** Raw degrees integrated since the last live correction. Discarded on latch. */
   rawYawAccumDeg: number;
   lastT: number | null;
   phase: Phase;
@@ -193,7 +180,6 @@ type FusionState = {
   lastMagHeading: number | null;
   headingMark: number;
   lastTrustedT: number | null;
-  /** Samples with t >= now - recoverHoldMs, oldest first. */
   recentMag: MagObs[];
 };
 
@@ -309,10 +295,10 @@ function applyMagnetometer(
     magnitudeUt,
     headingDeg: headingUsable ? magneticHeading : null,
   });
-  // Keep t >= now - recoverHoldMs. The sample exactly one hold ago stays,
-  // so the pre-jump heading still blocks release on the tick before it ages out.
-  const oldest = t - config.recoverHoldMs;
-  while (state.recentMag.length > 0 && state.recentMag[0]!.t < oldest) {
+  while (
+    state.recentMag.length > 0 &&
+    isOlderThanHold(state.recentMag[0]!.t, t, config.recoverHoldMs)
+  ) {
     state.recentMag.shift();
   }
 
@@ -357,6 +343,10 @@ function applyMagnetometer(
   }
 
   return { magneticHeading, magnitudeUt };
+}
+
+function isOlderThanHold(sampleT: number, now: number, recoverHoldMs: number): boolean {
+  return sampleT < now - recoverHoldMs;
 }
 
 function recoveryReady(
@@ -423,7 +413,6 @@ function isJump(state: FusionState, magneticHeading: number, config: HeadingFusi
   return Math.abs(wrap180(magDelta - gyroDelta)) > config.jumpThresholdDeg;
 }
 
-/** Faster compass motion is a step or a wobble, not a bias sample. Degrees per second. */
 const MAX_BIAS_COMPASS_RATE_DEG_PER_SEC = 30;
 
 function appliedYawDegPerSec(yaw: HeldYaw, biasDegPerSec: number): number {

@@ -20,8 +20,7 @@
  * The shared engine uses that for the static demo walk.
  * `EngineSnapshot.heading` is the course: the latest fused heading, else
  * the latest pushed heading, else the latest step heading, else the
- * configured initial heading (0°). `gyroOnly` comes from that same fused
- * sample, and is omitted when the heading did not come from fusion.
+ * configured initial heading (0°).
  *
  * Corridor snap is on unless `drift.corridor` says otherwise. Loop closure
  * and landmark tags are off until the caller asks. Landmark tags also

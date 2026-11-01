@@ -348,10 +348,6 @@ describe('level attitude math', () => {
   });
 });
 
-/**
- * Headings and closing error of the pre-leveling feed.
- * On a tilted leg the compass is stable and wrong, so fusion tracks it.
- */
 const MASTER_SQUARE: Record<number, { headings: number[]; errorM: number }> = {
   0: { headings: [0, 90, 180, 270], errorM: 0 },
   45: { headings: [180, 141.7762, 180.8448, 228.0267], errorM: 14.1645 },
