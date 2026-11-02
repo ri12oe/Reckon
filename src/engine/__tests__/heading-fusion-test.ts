@@ -697,7 +697,109 @@ describe('fuseHeading', () => {
     );
     expect(at(stalled, 11500).heading).toBeCloseTo(at(stalled, 10000).heading, 6);
   });
+
+  test('a 90° residual stays gyro-only at 4.9 s of clean mag and snaps to north at 8.0 s (before: still 90° and gyro-only at 12 s)', () => {
+    const times = clock(0, 13200);
+    const fused = fuseHeading(
+      gyroAt(times, (t) => (t >= 1000 && t < 3000 ? 45 : 0)),
+      magAt(times, (t) => {
+        if (t >= 1000 && t < 3000) return north(4);
+        if (t >= 8020) return field(80);
+        return north();
+      }),
+    );
+
+    expect(at(fused, 400)).toMatchObject({
+      heading: 0,
+      gyroOnly: false,
+      interference: false,
+    });
+    expect(at(fused, 2000).heading).toBeCloseTo(45, 6);
+    expect(at(fused, 2000)).toMatchObject({
+      magnitudeUt: 200,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 3000).heading).toBeCloseTo(90, 6);
+    expect(at(fused, 5000).heading).toBeCloseTo(90, 6);
+    expect(at(fused, 5000)).toMatchObject({
+      magneticHeading: 0,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 7980).heading).toBeCloseTo(90, 6);
+    expect(at(fused, 7980)).toMatchObject({
+      magneticHeading: 0,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 8000)).toMatchObject({
+      heading: 0,
+      magneticHeading: 0,
+      magnitudeUt: 50,
+      gyroOnly: false,
+      interference: false,
+    });
+    expect(at(fused, 8420)).toMatchObject({
+      heading: 0,
+      magneticHeading: 80,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 13000)).toMatchObject({
+      heading: 0,
+      magneticHeading: 80,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 13020)).toMatchObject({
+      heading: 80,
+      magneticHeading: 80,
+      gyroOnly: false,
+      interference: false,
+    });
+  });
+
+  test('29°/s against a still compass coasts under 0.5° in one quiet second (before: 17.6°)', () => {
+    const spikeEnd = 6000;
+    const coastStart = 6200;
+    const coastEnd = 7200;
+    const times = clock(0, coastEnd);
+    const fused = fuseHeading(
+      gyroAt(times, (t) => (t >= 1000 && t < spikeEnd ? 29 : 0)),
+      magAt(
+        times.filter((t) => t <= coastStart),
+        north(),
+      ),
+    );
+    const delta = wrap180(at(fused, coastEnd).heading - at(fused, coastStart).heading);
+
+    expect(at(fused, 400)).toMatchObject({ gyroOnly: false, interference: false });
+    expect(Math.abs(delta)).toBeLessThan(0.5);
+  });
+
+  test('a 200 ms burst at 200°/s coasts under 0.5° in one quiet second (before: 5.5°)', () => {
+    const burstEnd = 1200;
+    const coastStart = 1400;
+    const coastEnd = 2400;
+    const times = clock(0, coastEnd);
+    const fused = fuseHeading(
+      gyroAt(times, (t) => (t >= 1000 && t < burstEnd ? 200 : 0)),
+      magAt(
+        times.filter((t) => t <= coastStart),
+        north(),
+      ),
+    );
+    const delta = wrap180(at(fused, coastEnd).heading - at(fused, coastStart).heading);
+
+    expect(Math.abs(delta)).toBeLessThan(0.5);
+  });
 });
+
+function wrap180(deg: number): number {
+  const wrapped = ((deg % 360) + 360) % 360;
+  return wrapped > 180 ? wrapped - 360 : wrapped;
+}
 
 describe('getEngine', () => {
   test('serves the demo snapshot until a sample; mockEngine keeps the static walk', () => {
