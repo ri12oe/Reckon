@@ -1,5 +1,5 @@
 import { commitStepLength } from '@/calibration/commit';
-import { isCalibrated, readStepLength } from '@/db/calibration';
+import { isCalibrated, readStepLength, saveStepLength } from '@/db/calibration';
 import { createLiveEngine } from '@/engine/live-engine';
 
 const state: { db: FakeDb | null } = { db: null };
@@ -149,6 +149,72 @@ describe('commitStepLength', () => {
       expect(restarted.getStepLength()).toBe(0.75);
       restarted.pushStep({ t: 100, heading: 90 });
       expect(restarted.getSnapshot().rawPath[1]!.x).toBe(0.75);
+    });
+  });
+
+  test('a saved length survives reset and the next east step uses it', () => {
+    state.db = memoryDb();
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getEngine } = require('@/engine') as typeof import('@/engine');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { commitStepLength: commit } =
+        require('@/calibration/commit') as typeof import('@/calibration/commit');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { createLiveEngine: fresh } =
+        require('@/engine/live-engine') as typeof import('@/engine/live-engine');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { startNewFloor } =
+        require('@/library/new-floor') as typeof import('@/library/new-floor');
+
+      const live = getEngine();
+      expect(live.getStepLength()).toBe(0.75);
+      live.setStepLength(0.5);
+      live.reset();
+      expect(live.getStepLength()).toBe(0.75);
+
+      const calibration = fresh();
+      for (let i = 0; i < 8; i++) east(calibration, (i + 1) * 400);
+      const estimate = calibration.calibrateStepLength(5);
+      expect(commit(estimate, live)).toEqual({ stepLengthM: 0.625, distanceM: 5, stepCount: 8 });
+      expect(live.getStepLength()).toBe(0.625);
+
+      startNewFloor();
+      expect(live.getStepLength()).toBe(0.625);
+      east(live, 100);
+      expect(live.getSnapshot().stepCount).toBe(1);
+      expect(live.getSnapshot().rawPath[1]!.x).toBe(0.625);
+    });
+  });
+
+  test('reset uses the latest saved length, not the length from construction', () => {
+    state.db = memoryDb();
+    expect(saveStepLength({ stepLengthM: 0.7, distanceM: 7, stepCount: 10 })).toEqual({
+      stepLengthM: 0.7,
+      distanceM: 7,
+      stepCount: 10,
+    });
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getEngine } = require('@/engine') as typeof import('@/engine');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { commitStepLength: commit } =
+        require('@/calibration/commit') as typeof import('@/calibration/commit');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { createLiveEngine: fresh } =
+        require('@/engine/live-engine') as typeof import('@/engine/live-engine');
+
+      const live = getEngine();
+      expect(live.getStepLength()).toBe(0.7);
+
+      const calibration = fresh();
+      for (let i = 0; i < 8; i++) east(calibration, (i + 1) * 400);
+      expect(commit(calibration.calibrateStepLength(5), live)?.stepLengthM).toBe(0.625);
+
+      live.reset();
+      expect(live.getStepLength()).toBe(0.625);
+      east(live, 100);
+      expect(live.getSnapshot().rawPath[1]!.x).toBe(0.625);
     });
   });
 });
