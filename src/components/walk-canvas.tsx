@@ -3,55 +3,14 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { PathMarkers } from '@/components/path-markers';
-import type { EngineSnapshot, PathPoint } from '@/engine';
+import type { EngineSnapshot } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
+import { boundsOf, placeFrame } from '@/map/geometry';
+import { useLiveStroke } from '@/map/live-stroke';
 
 const PAD = 40;
 const PIN_RADIUS = 6;
-/** Meters shown around you in follow mode. */
 const FOLLOW_SPAN_M = 12;
-
-type XY = { x: number; y: number };
-
-function boundsOf(points: readonly XY[]) {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const point of points) {
-    minX = Math.min(minX, point.x);
-    maxX = Math.max(maxX, point.x);
-    minY = Math.min(minY, point.y);
-    maxY = Math.max(maxY, point.y);
-  }
-  return { minX, maxX, minY, maxY };
-}
-
-function makeProjector(frame: readonly XY[], width: number, height: number) {
-  if (frame.length === 0 || width <= PAD * 2 || height <= PAD * 2) return null;
-
-  const { minX, maxX, minY, maxY } = boundsOf(frame);
-  const spanX = Math.max(maxX - minX, 1);
-  const spanY = Math.max(maxY - minY, 1);
-  const scale = Math.min((width - PAD * 2) / spanX, (height - PAD * 2) / spanY);
-  const offsetX = (width - spanX * scale) / 2;
-  const offsetY = (height - spanY * scale) / 2;
-
-  return (point: XY): XY => ({
-    x: offsetX + (point.x - minX) * scale,
-    y: offsetY + (maxY - point.y) * scale,
-  });
-}
-
-function project(points: readonly PathPoint[], place: (point: XY) => XY) {
-  if (points.length === 0) return '';
-  const first = place(points[0]);
-  const rest = points.slice(1).map((point) => {
-    const placed = place(point);
-    return `L ${placed.x} ${placed.y}`;
-  });
-  return `M ${first.x} ${first.y} ${rest.join(' ')}`;
-}
 
 type Props = {
   snapshot: EngineSnapshot;
@@ -63,20 +22,20 @@ export default function WalkCanvas({ snapshot, follow = false }: Props) {
   const theme = useTheme();
   const [size, setSize] = useState({ width: 0, height: 0 });
   const here = snapshot.correctedPath[snapshot.correctedPath.length - 1];
-  const frame =
+  const framePoints =
     follow && here
       ? [
           { x: here.x - FOLLOW_SPAN_M / 2, y: here.y - FOLLOW_SPAN_M / 2 },
           { x: here.x + FOLLOW_SPAN_M / 2, y: here.y + FOLLOW_SPAN_M / 2 },
         ]
       : [...snapshot.rawPath, ...snapshot.correctedPath, ...snapshot.pins];
-  const place = makeProjector(frame, size.width, size.height);
-  const raw = place ? project(snapshot.rawPath, place) : '';
-  const corrected = place ? project(snapshot.correctedPath, place) : '';
-  const pins = place ? snapshot.pins.map((pin) => ({ id: pin.id, ...place(pin) })) : [];
-  const path = snapshot.correctedPath;
-  const start = place && path.length > 0 ? place(path[0]) : null;
-  const end = place && path.length > 0 ? place(path[path.length - 1]) : null;
+  const bounds = boundsOf(framePoints);
+  const frame = bounds ? placeFrame(bounds, size.width, size.height, PAD) : null;
+  const raw = useLiveStroke(snapshot.rawPath, frame);
+  const corrected = useLiveStroke(snapshot.correctedPath, frame);
+  const pins = frame ? snapshot.pins.map((pin) => ({ id: pin.id, ...frame.place(pin) })) : [];
+  const start = corrected.placed[0] ?? null;
+  const end = corrected.placed[corrected.placed.length - 1] ?? null;
 
   return (
     <View
@@ -90,9 +49,9 @@ export default function WalkCanvas({ snapshot, follow = false }: Props) {
     >
       {size.width > 0 && size.height > 0 ? (
         <Canvas style={StyleSheet.absoluteFill}>
-          {raw ? (
+          {raw.path ? (
             <Path
-              path={raw}
+              path={raw.path}
               color={theme.pathRaw}
               style="stroke"
               strokeWidth={2}
@@ -100,9 +59,9 @@ export default function WalkCanvas({ snapshot, follow = false }: Props) {
               strokeJoin="round"
             />
           ) : null}
-          {corrected ? (
+          {corrected.path ? (
             <Path
-              path={corrected}
+              path={corrected.path}
               color={theme.pathCorrected}
               style="stroke"
               strokeWidth={4}
