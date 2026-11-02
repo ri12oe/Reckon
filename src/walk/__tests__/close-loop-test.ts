@@ -38,6 +38,30 @@ describe('back at start visibility', () => {
     expect(showBackAtStart(shown)).toBe(false);
   });
 
+  test('hides a canned demo even when its corrected end is the start', () => {
+    const nearStart: EngineSnapshot = {
+      rawPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 0, y: 0, t: 500 },
+      ],
+      correctedPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 0, y: 0, t: 500 },
+      ],
+      stepCount: 1,
+      heading: 0,
+      pins: [],
+      isCannedDemo: true,
+    };
+    const engine = createLiveEngine({ emptySnapshot: nearStart });
+    const shown = engine.getSnapshot();
+
+    expect(isCannedDemo(shown)).toBe(true);
+    expect(shown.stepCount).toBeGreaterThan(0);
+    expect(gaps(shown).correctedFromStart).toBe(0);
+    expect(showBackAtStart(shown)).toBe(false);
+  });
+
   test('hides after the first live sample and before a step', () => {
     const engine = createLiveEngine({ emptySnapshot: mockEngine.getSnapshot() });
     engine.pushAccel({ t: 0, x: 0, y: 0, z: STANDARD_GRAVITY_MPS2 });
@@ -45,17 +69,79 @@ describe('back at start visibility', () => {
 
     expect(isCannedDemo(shown)).toBe(false);
     expect(shown.stepCount).toBe(0);
+    expect(gaps(shown).correctedFromStart).toBe(0);
     expect(showBackAtStart(shown)).toBe(false);
   });
 
-  test('shows once a live step exists', () => {
+  test('shows when a live step leaves the corrected end within 3 m of the start', () => {
     const engine = createLiveEngine({ emptySnapshot: mockEngine.getSnapshot(), stepLengthM: 1 });
     engine.pushStep({ t: 500, heading: 90 });
     const shown = engine.getSnapshot();
 
     expect(isCannedDemo(shown)).toBe(false);
     expect(shown.stepCount).toBe(1);
+    expect(gaps(shown).correctedFromStart).toBeCloseTo(1, 6);
     expect(showBackAtStart(shown)).toBe(true);
+  });
+
+  test('shows when the corrected end is exactly 3 m from the path start', () => {
+    const engine = createLiveEngine({ stepLengthM: 1 });
+    east(engine, 3);
+    const shown = engine.getSnapshot();
+
+    expect(shown.stepCount).toBe(3);
+    expect(gaps(shown).correctedFromStart).toBeCloseTo(3, 6);
+    expect(showBackAtStart(shown)).toBe(true);
+  });
+
+  test('hides when the corrected end is farther than 3 m from the path start', () => {
+    const engine = createLiveEngine({ stepLengthM: 3.01 });
+    engine.pushStep({ t: 500, heading: 90 });
+    const shown = engine.getSnapshot();
+
+    expect(shown.stepCount).toBe(1);
+    expect(gaps(shown).correctedFromStart).toBeGreaterThan(3);
+    expect(showBackAtStart(shown)).toBe(false);
+  });
+
+  test('measures that gap from the path start when the walk did not begin at the world origin', () => {
+    const engine = createLiveEngine({ originX: 20, originY: -4, stepLengthM: 1 });
+    engine.pushStep({ t: 500, heading: 90 });
+    const shown = engine.getSnapshot();
+
+    expect(shown.correctedPath[0]).toMatchObject({ x: 20, y: -4 });
+    expect(gaps(shown).correctedFromStart).toBeCloseTo(1, 6);
+    expect(showBackAtStart(shown)).toBe(true);
+  });
+
+  test('follows the corrected end when the raw end is somewhere else', () => {
+    const nearCorrected: EngineSnapshot = {
+      rawPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 10, y: 0, t: 500 },
+      ],
+      correctedPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 2, y: 0, t: 500 },
+      ],
+      stepCount: 1,
+      heading: 90,
+      pins: [],
+    };
+    const farCorrected: EngineSnapshot = {
+      ...nearCorrected,
+      rawPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 1, y: 0, t: 500 },
+      ],
+      correctedPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 10, y: 0, t: 500 },
+      ],
+    };
+
+    expect(showBackAtStart(nearCorrected)).toBe(true);
+    expect(showBackAtStart(farCorrected)).toBe(false);
   });
 });
 
