@@ -34,6 +34,7 @@ import {
   type HeldPin,
   type WalkPinRead,
 } from '@/walk/pin-drop';
+import { startWalkSensors } from '@/walk/sensors';
 import { formatDistance, formatHeading, headingIsGyroOnly, pathLength } from '@/walk/stats';
 
 /** Re-read the engine often enough to track a step as it lands. */
@@ -48,6 +49,7 @@ export default function WalkScreen() {
   const droppedRef = useRef(0);
   const heldRef = useRef<HeldPin[]>([]);
   const loopHold = useRef<LoopHold | null>(null);
+  const startLiveWalk = useRef<(() => void) | null>(null);
 
   const applyPinRead = useCallback((engine: LiveFloorwalkerEngine, result: WalkPinRead) => {
     commitWalkPins(engine, result);
@@ -75,13 +77,13 @@ export default function WalkScreen() {
       read();
       const timer = setInterval(read, POLL_MS);
       const engine = poll(heldRef.current).engine;
-      void engine.startSensors().then((started) => {
-        if (stopped) return;
-        if (!started.ok && started.reason === 'cancelled') return;
-        read();
-      });
+      startLiveWalk.current = () => {
+        void startWalkSensors(engine, getActiveFloor(), () => !stopped, read);
+      };
+      startLiveWalk.current();
       return () => {
         stopped = true;
+        startLiveWalk.current = null;
         clearInterval(timer);
         engine.stopSensors();
       };
@@ -130,6 +132,7 @@ export default function WalkScreen() {
       engine,
       readWalk(engine.getSnapshot(), mockEngine.getSnapshot(), false, heldRef.current),
     );
+    startLiveWalk.current?.();
   };
 
   return (
