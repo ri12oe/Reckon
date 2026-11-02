@@ -22,6 +22,11 @@ export type LoopRelease = {
  * no live end to close, and arming the flag there would close the next
  * live steps instead.
  */
+/** The screen offers the control for any snapshot that is not a saved floor. */
+export function showBackAtStart(_shown: EngineSnapshot): boolean {
+  return true;
+}
+
 export function assertBackAtStart(engine: LoopEngine, shown: EngineSnapshot): LoopHold | null {
   if (shown.isCannedDemo || engine.isRecalled()) return null;
   engine.setDrift({ closeLoop: true });

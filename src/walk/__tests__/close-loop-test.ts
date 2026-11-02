@@ -1,10 +1,12 @@
 import {
   createLiveEngine,
+  isCannedDemo,
   mockEngine,
   type EngineSnapshot,
   type LiveFloorwalkerEngine,
 } from '@/engine';
-import { assertBackAtStart, releaseBackAtStart } from '@/walk/close-loop';
+import { STANDARD_GRAVITY_MPS2 } from '@/engine/step-detector';
+import { assertBackAtStart, releaseBackAtStart, showBackAtStart } from '@/walk/close-loop';
 
 const desk = { id: 'desk', x: 1.5, y: 2.5, label: 'desk' };
 
@@ -25,6 +27,37 @@ function gaps(snapshot: EngineSnapshot) {
     rawFromCorrected: Math.hypot(raw.x - end.x, raw.y - end.y),
   };
 }
+
+describe('back at start visibility', () => {
+  test('hides on the canned demo picture', () => {
+    const engine = createLiveEngine({ emptySnapshot: mockEngine.getSnapshot() });
+    const shown = engine.getSnapshot();
+
+    expect(shown.isCannedDemo).toBe(true);
+    expect(shown.stepCount).toBeGreaterThan(0);
+    expect(showBackAtStart(shown)).toBe(false);
+  });
+
+  test('hides after the first live sample and before a step', () => {
+    const engine = createLiveEngine({ emptySnapshot: mockEngine.getSnapshot() });
+    engine.pushAccel({ t: 0, x: 0, y: 0, z: STANDARD_GRAVITY_MPS2 });
+    const shown = engine.getSnapshot();
+
+    expect(isCannedDemo(shown)).toBe(false);
+    expect(shown.stepCount).toBe(0);
+    expect(showBackAtStart(shown)).toBe(false);
+  });
+
+  test('shows once a live step exists', () => {
+    const engine = createLiveEngine({ emptySnapshot: mockEngine.getSnapshot(), stepLengthM: 1 });
+    engine.pushStep({ t: 500, heading: 90 });
+    const shown = engine.getSnapshot();
+
+    expect(isCannedDemo(shown)).toBe(false);
+    expect(shown.stepCount).toBe(1);
+    expect(showBackAtStart(shown)).toBe(true);
+  });
+});
 
 describe('back at start', () => {
   test('the control closes the corrected end on the start and leaves the raw end', () => {
