@@ -54,10 +54,26 @@ function place(pins: readonly HeldPin[], at: { x: number; y: number }): Pin[] {
   return pins.map((pin) => ({ id: pin.id, label: pin.label, x: at.x, y: at.y }));
 }
 
+function withDrop(held: readonly HeldPin[], extra: HeldPin | null): HeldPin[] {
+  if (!extra || held.some((pin) => pin.id === extra.id)) return [...held];
+  return [...held, extra];
+}
+
+function drawPins(existing: readonly Pin[], added: readonly Pin[]): Pin[] {
+  const seen = new Set(existing.map((pin) => pin.id));
+  const pins = [...existing];
+  for (const pin of added) {
+    if (seen.has(pin.id)) continue;
+    seen.add(pin.id);
+    pins.push(pin);
+  }
+  return pins;
+}
+
 function showHeld(snapshot: EngineSnapshot, held: readonly HeldPin[]): EngineSnapshot {
   const at = pathEnd(snapshot);
   if (!at || held.length === 0) return snapshot;
-  return { ...snapshot, pins: [...snapshot.pins, ...place(held, at)] };
+  return { ...snapshot, pins: drawPins(snapshot.pins, place(held, at)) };
 }
 
 function finish(
@@ -71,12 +87,11 @@ function finish(
   if (source === 'recalled') {
     return { held: [...held], commit: [], shown: snapshot };
   }
+  const waiting = withDrop(held, extra);
   if (source === 'demo') {
-    const next = extra ? [...held, extra] : [...held];
-    return { held: next, commit: [], shown: showHeld(snapshot, next) };
+    return { held: waiting, commit: [], shown: showHeld(snapshot, waiting) };
   }
   const at = pathEnd(snapshot);
-  const waiting = extra ? [...held, extra] : [...held];
   if (!at || waiting.length === 0) {
     return { held: [...held], commit: [], shown: snapshot };
   }
@@ -84,7 +99,7 @@ function finish(
   return {
     held: [],
     commit,
-    shown: { ...snapshot, pins: [...snapshot.pins, ...place(waiting, at)] },
+    shown: { ...snapshot, pins: drawPins(snapshot.pins, place(waiting, at)) },
   };
 }
 
@@ -112,4 +127,38 @@ export function dropWalkPin(
   pin: HeldPin,
 ): WalkPinRead {
   return finish(snapshot, demo, recalled, held, pin);
+}
+
+export type OpenLandmark = {
+  pin: HeldPin | null;
+  count: number;
+};
+
+export function emptyLandmark(): OpenLandmark {
+  return { pin: null, count: 0 };
+}
+
+function pinToDrop(open: OpenLandmark): { pin: HeldPin; open: OpenLandmark } {
+  if (open.pin) return { pin: open.pin, open };
+  const count = open.count + 1;
+  const pin = { id: `pin-${count}`, label: `Pin ${count}` };
+  return { pin, open: { pin, count } };
+}
+
+export function newLandmark(open: OpenLandmark): OpenLandmark {
+  if (open.pin === null) return open;
+  return { pin: null, count: open.count };
+}
+
+export function dropLandmark(
+  open: OpenLandmark,
+  snapshot: EngineSnapshot,
+  demo: EngineSnapshot,
+  recalled: boolean,
+  held: readonly HeldPin[],
+): { open: OpenLandmark; read: WalkPinRead; placed: boolean } {
+  const next = pinToDrop(open);
+  const read = dropWalkPin(snapshot, demo, recalled, held, next.pin);
+  const placed = read.commit.length > 0 || read.held.length > held.length;
+  return { open: placed ? next.open : open, read, placed };
 }

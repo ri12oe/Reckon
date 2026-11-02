@@ -29,9 +29,12 @@ import {
 import { createWalkPoll } from '@/walk/live-poll';
 import {
   commitWalkPins,
-  dropWalkPin,
+  dropLandmark,
+  emptyLandmark,
+  newLandmark,
   readWalk,
   type HeldPin,
+  type OpenLandmark,
   type WalkPinRead,
 } from '@/walk/pin-drop';
 import { formatDistance, formatHeading, headingIsGyroOnly, pathLength } from '@/walk/stats';
@@ -45,7 +48,7 @@ export default function WalkScreen() {
   const [active, setActive] = useState<ActiveFloor | null>(() => getActiveFloor());
   const [follow, setFollow] = useState(false);
   const stepsRef = useRef(snapshot.stepCount);
-  const droppedRef = useRef(0);
+  const landmarkRef = useRef<OpenLandmark>(emptyLandmark());
   const heldRef = useRef<HeldPin[]>([]);
   const loopHold = useRef<LoopHold | null>(null);
 
@@ -106,18 +109,20 @@ export default function WalkScreen() {
 
   const dropPin = () => {
     const engine = getEngine();
-    const n = droppedRef.current + 1;
-    const result = dropWalkPin(
+    const result = dropLandmark(
+      landmarkRef.current,
       engine.getSnapshot(),
       mockEngine.getSnapshot(),
       engine.isRecalled(),
       heldRef.current,
-      { id: `pin-${n}`, label: `Pin ${n}` },
     );
-    const placed = result.commit.length > 0 || result.held.length > heldRef.current.length;
-    if (!placed) return;
-    droppedRef.current = n;
-    applyPinRead(engine, result);
+    if (!result.placed) return;
+    landmarkRef.current = result.open;
+    applyPinRead(engine, result.read);
+  };
+
+  const newPin = () => {
+    landmarkRef.current = newLandmark(landmarkRef.current);
   };
 
   const heading = Number.isFinite(snapshot.heading) ? snapshot.heading : 0;
@@ -180,13 +185,22 @@ export default function WalkScreen() {
             style={styles.primary}
           />
         ) : (
-          <Button
-            label="Drop pin"
-            variant="primary"
-            icon="pin"
-            onPress={dropPin}
-            style={styles.primary}
-          />
+          <>
+            <Button
+              label="New pin"
+              variant="glass"
+              compact
+              accessibilityHint="The next drop starts a new landmark"
+              onPress={newPin}
+            />
+            <Button
+              label="Drop pin"
+              variant="primary"
+              icon="pin"
+              onPress={dropPin}
+              style={styles.primary}
+            />
+          </>
         )}
         <IconButton
           icon="locate"
