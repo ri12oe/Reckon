@@ -164,14 +164,61 @@ function behavesLikeFloorStore(name: string, open: () => FloorStore | Promise<Fl
       expect(saved.pinCount).toBe(0);
       expect(saved.pointCount).toBe(1);
       expect(saved.heading).toBe(0);
-      expect(saved.snapshot).toEqual({
+      const empty = {
         rawPath: [{ x: 0, y: 0, t: 0 }],
         correctedPath: [{ x: 0, y: 0, t: 0 }],
         stepCount: 0,
         heading: 0,
         pins: [],
+      };
+      expect(saved.snapshot).toEqual(empty);
+      expect(store.get(saved.id)?.snapshot).toEqual(empty);
+    });
+
+    test('reloads gyroOnly true, false, and omitted', async () => {
+      const store = await open();
+      const gyro = store.save({
+        buildingName: 'North Hall',
+        floorName: 'Gyro',
+        snapshot: { ...sample(), gyroOnly: true },
       });
-      expect(store.get(saved.id)?.snapshot.stepCount).toBe(0);
+      const trusted = store.save({
+        buildingName: 'North Hall',
+        floorName: 'Trusted',
+        snapshot: { ...sample(), gyroOnly: false },
+      });
+      const plain = store.save({
+        buildingName: 'North Hall',
+        floorName: 'Plain',
+        snapshot: sample(),
+      });
+
+      expect(store.get(gyro.id)?.snapshot.gyroOnly).toBe(true);
+      expect(store.get(trusted.id)?.snapshot.gyroOnly).toBe(false);
+      expect(store.get(plain.id)?.snapshot.gyroOnly).toBeUndefined();
+      expect(store.get(plain.id)?.snapshot).toEqual(sample());
+
+      const gyroFloor = store.get(gyro.id);
+      const trustedFloor = store.get(trusted.id);
+      const plainFloor = store.get(plain.id);
+      if (!gyroFloor || !trustedFloor || !plainFloor) throw new Error('saved floor missing');
+      expect(floorExportDocument(gyroFloor).snapshot.gyroOnly).toBe(true);
+      expect(floorExportDocument(trustedFloor).snapshot.gyroOnly).toBe(false);
+      expect(floorExportDocument(plainFloor).snapshot.gyroOnly).toBeUndefined();
+      expect(floorExportDocument(plainFloor).snapshot).toEqual(sample());
+    });
+
+    test('reloads gyroOnly false and leaves a sensor fault off the snapshot', async () => {
+      const store = await open();
+      const saved = store.save({
+        buildingName: 'North Hall',
+        floorName: 'Level 1',
+        snapshot: { ...sample(), gyroOnly: false, sensorStartFailed: 'permission' },
+      });
+      const loaded = store.get(saved.id)?.snapshot;
+      expect(loaded?.gyroOnly).toBe(false);
+      expect(loaded?.sensorStartFailed).toBeUndefined();
+      expect(loaded?.isCannedDemo).toBeUndefined();
     });
   });
 }
@@ -213,48 +260,6 @@ function wrap(db: SqliteDatabase): SqlExecutor {
 describe('floor stores', () => {
   behavesLikeFloorStore('memory', () => createMemoryFloorStore({ now: clock() }));
   behavesLikeFloorStore('sqlite', openSqlite);
-
-  test('a memory floor recalls gyroOnly true, false, and omitted', () => {
-    const store = createMemoryFloorStore({ now: clock() });
-    const gyro = store.save({
-      buildingName: 'North Hall',
-      floorName: 'Gyro',
-      snapshot: { ...sample(), gyroOnly: true },
-    });
-    const trusted = store.save({
-      buildingName: 'North Hall',
-      floorName: 'Trusted',
-      snapshot: { ...sample(), gyroOnly: false },
-    });
-    const plain = store.save({
-      buildingName: 'North Hall',
-      floorName: 'Plain',
-      snapshot: sample(),
-    });
-
-    expect(store.get(gyro.id)?.snapshot.gyroOnly).toBe(true);
-    expect(store.get(trusted.id)?.snapshot.gyroOnly).toBe(false);
-    expect(store.get(plain.id)?.snapshot.gyroOnly).toBeUndefined();
-
-    const gyroFloor = store.get(gyro.id);
-    const trustedFloor = store.get(trusted.id);
-    const plainFloor = store.get(plain.id);
-    if (!gyroFloor || !trustedFloor || !plainFloor) throw new Error('saved floor missing');
-    expect(floorExportDocument(gyroFloor).snapshot.gyroOnly).toBe(true);
-    expect(floorExportDocument(trustedFloor).snapshot.gyroOnly).toBe(false);
-    expect(floorExportDocument(plainFloor).snapshot.gyroOnly).toBeUndefined();
-  });
-
-  test('sqlite save keeps gyroOnly on the returned floor and reload drops it', () => {
-    const store = openSqlite();
-    const saved = store.save({
-      buildingName: 'North Hall',
-      floorName: 'Gyro',
-      snapshot: { ...sample(), gyroOnly: true },
-    });
-    expect(saved.snapshot.gyroOnly).toBe(true);
-    expect(store.get(saved.id)?.snapshot.gyroOnly).toBeUndefined();
-  });
 
   test('sqlite creates the floor tables', () => {
     const { DatabaseSync } = loadSqlite();
