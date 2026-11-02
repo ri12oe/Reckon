@@ -1,4 +1,4 @@
-import { emptyRecording, getEngine, mockEngine } from '@/engine';
+import { emptyRecording, getEngine, isCannedDemo, mockEngine } from '@/engine';
 import { createLiveEngine } from '@/engine/live-engine';
 import { STANDARD_GRAVITY_MPS2, type AccelSample } from '@/engine/step-detector';
 import type { EngineSnapshot, PathPoint } from '@/engine/types';
@@ -838,6 +838,48 @@ describe('drift correction on the live path', () => {
     engine.recallSnapshot(demo);
     expect(engine.getSnapshot()).toEqual(demo);
     expect(engine.snapshotForSave()).toEqual(emptyRecording());
+  });
+
+  test('the demo picture is marked canned and an empty save matches its path', () => {
+    const demo = mockEngine.getSnapshot();
+    const engine = createLiveEngine({ emptySnapshot: demo });
+    const picture = engine.getSnapshot();
+    const saved = engine.snapshotForSave();
+
+    expect({
+      stepCount: picture.stepCount,
+      points: picture.correctedPath.length,
+      isCannedDemo: picture.isCannedDemo === true,
+    }).toEqual({ stepCount: 12, points: 7, isCannedDemo: true });
+
+    expect({
+      stepCount: saved.stepCount,
+      points: saved.correctedPath.length,
+      rawPoints: saved.rawPath.length,
+      isCannedDemo: saved.isCannedDemo === true,
+    }).toEqual({ stepCount: 0, points: 1, rawPoints: 1, isCannedDemo: false });
+    expect(saved.stepCount).toBe(saved.correctedPath.length - 1);
+
+    const overlaid: EngineSnapshot = {
+      ...picture,
+      pins: [...picture.pins, { id: 'extra', x: 1, y: 1, label: 'extra' }],
+    };
+    engine.recallSnapshot(overlaid);
+    const refused = engine.snapshotForSave();
+    expect({
+      canned: isCannedDemo(overlaid),
+      stepCount: refused.stepCount,
+      points: refused.correctedPath.length,
+    }).toEqual({ canned: true, stepCount: 0, points: 1 });
+
+    engine.reset();
+    engine.pushStep({ t: 500, heading: 90 });
+    const live = engine.getSnapshot();
+    expect(live.isCannedDemo).toBeUndefined();
+    expect(isCannedDemo(live)).toBe(false);
+    expect(live.stepCount).toBe(1);
+    expect(live.correctedPath).toHaveLength(live.stepCount + 1);
+    expect(engine.snapshotForSave()).toEqual(live);
   });
 });
 
