@@ -1,5 +1,9 @@
 import { createHallwayCalibration } from '@/calibration/hallway';
-import { CALIBRATION_STEPS, beginCalibration, type CalibrationSession } from '@/calibration/session';
+import {
+  CALIBRATION_STEPS,
+  beginCalibration,
+  type CalibrationSession,
+} from '@/calibration/session';
 import { isCalibrated, readStepLength } from '@/db/calibration';
 import { createLiveEngine } from '@/engine/live-engine';
 
