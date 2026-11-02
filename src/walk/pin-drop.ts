@@ -1,4 +1,4 @@
-import type { EngineSnapshot, PathPoint, Pin } from '@/engine';
+import type { EngineSnapshot, LandmarkPin, PathPoint, Pin } from '@/engine';
 
 export type HeldPin = {
   id: string;
@@ -7,7 +7,7 @@ export type HeldPin = {
 
 export type WalkPinRead = {
   held: HeldPin[];
-  commit: Pin[];
+  commit: LandmarkPin[];
   shown: EngineSnapshot;
 };
 
@@ -80,12 +80,19 @@ function finish(
   if (!at || waiting.length === 0) {
     return { held: [...held], commit: [], shown: snapshot };
   }
-  const commit = place(waiting, at);
+  const commit = waiting.map((pin) => ({ id: pin.id, label: pin.label }));
   return {
     held: [],
     commit,
-    shown: { ...snapshot, pins: [...snapshot.pins, ...commit] },
+    shown: { ...snapshot, pins: [...snapshot.pins, ...place(waiting, at)] },
   };
+}
+
+export function commitWalkPins(
+  engine: { tagLandmark(tag: LandmarkPin): void },
+  read: WalkPinRead,
+): void {
+  for (const tag of read.commit) engine.tagLandmark(tag);
 }
 
 export function readWalk(

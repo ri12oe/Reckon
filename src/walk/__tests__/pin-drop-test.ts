@@ -1,5 +1,5 @@
 import { createLiveEngine, mockEngine, type EngineSnapshot } from '@/engine';
-import { dropWalkPin, readWalk, type HeldPin } from '@/walk/pin-drop';
+import { commitWalkPins, dropWalkPin, readWalk, type HeldPin } from '@/walk/pin-drop';
 
 const pin: HeldPin = { id: 'pin-1', label: 'pin 1' };
 
@@ -19,7 +19,11 @@ describe('walk pin drop', () => {
     expect(dropped.commit).toEqual([]);
     expect(dropped.held).toEqual([pin]);
     expect(dropped.shown.pins.at(-1)).toEqual({ ...pin, ...demoEnd(demo) });
+    commitWalkPins(engine, dropped);
     expect(engine.getSnapshot().pins.map((item) => item.id)).toEqual(['door', 'desk']);
+
+    engine.pushStep({ t: 1000, heading: 0 });
+    expect(engine.getSnapshot().pins.map((item) => item.id)).not.toContain(pin.id);
   });
 
   test('a start fault on the demo still holds the pin instead of storing it', () => {
@@ -41,7 +45,8 @@ describe('walk pin drop', () => {
     if (!end) throw new Error('live path is empty');
 
     const dropped = dropWalkPin(live, demo, false, [], pin);
-    for (const item of dropped.commit) engine.addPin(item);
+    expect(dropped.commit).toEqual([{ id: pin.id, label: pin.label }]);
+    commitWalkPins(engine, dropped);
 
     expect(dropped.held).toEqual([]);
     expect(dropped.shown.pins).toContainEqual({
@@ -67,7 +72,8 @@ describe('walk pin drop', () => {
 
     engine.pushStep({ t: 1000, heading: 0 });
     const settled = readWalk(engine.getSnapshot(), demo, false, dropped.held);
-    for (const item of settled.commit) engine.addPin(item);
+    expect(settled.commit).toEqual([{ id: pin.id, label: pin.label }]);
+    commitWalkPins(engine, settled);
 
     const live = engine.getSnapshot();
     const end = live.correctedPath.at(-1);
@@ -84,6 +90,41 @@ describe('walk pin drop', () => {
 
     const again = readWalk(live, demo, false, settled.held);
     expect(again.commit).toEqual([]);
+    expect(engine.snapshotForSave().pins).toContainEqual({
+      id: pin.id,
+      label: pin.label,
+      x: end.x,
+      y: end.y,
+    });
+  });
+
+  test('a live pin stays on the path when the walk is snapped', () => {
+    const demo = mockEngine.getSnapshot();
+    const engine = createLiveEngine({ stepLengthM: 1, drift: { corridor: false } });
+    for (const [index, heading] of [10, 10, 10, 10].entries()) {
+      engine.pushStep({ t: (index + 1) * 500, heading });
+    }
+
+    const dropped = dropWalkPin(engine.getSnapshot(), demo, false, [], pin);
+    expect(dropped.commit).toEqual([{ id: pin.id, label: pin.label }]);
+    commitWalkPins(engine, dropped);
+
+    const before = engine.getSnapshot();
+    const end = before.correctedPath.at(-1);
+    if (!end) throw new Error('live path is empty');
+    expect(before.pins).toContainEqual({ id: pin.id, label: pin.label, x: end.x, y: end.y });
+
+    engine.setDrift({ corridor: true });
+    const after = engine.getSnapshot();
+    const snapped = after.correctedPath.at(-1);
+    if (!snapped) throw new Error('snapped path is empty');
+    expect(after.pins).toContainEqual({
+      id: pin.id,
+      label: pin.label,
+      x: snapped.x,
+      y: snapped.y,
+    });
+    expect(snapped).not.toEqual(end);
   });
 
   test('a recalled floor does not take a pin that is still held for the live walk', () => {

@@ -21,7 +21,13 @@ import { lightHaptic } from '@/haptics';
 import { useTheme } from '@/hooks/use-theme';
 import { walkPill } from '@/sensor-start';
 import { createWalkPoll } from '@/walk/live-poll';
-import { dropWalkPin, readWalk, type HeldPin, type WalkPinRead } from '@/walk/pin-drop';
+import {
+  commitWalkPins,
+  dropWalkPin,
+  readWalk,
+  type HeldPin,
+  type WalkPinRead,
+} from '@/walk/pin-drop';
 import { formatDistance, formatHeading, headingIsGyroOnly, pathLength } from '@/walk/stats';
 
 /** Re-read the engine often enough to track a step as it lands. */
@@ -37,7 +43,7 @@ export default function WalkScreen() {
   const heldRef = useRef<HeldPin[]>([]);
 
   const applyPinRead = useCallback((engine: LiveFloorwalkerEngine, result: WalkPinRead) => {
-    for (const pin of result.commit) engine.addPin(pin);
+    commitWalkPins(engine, result);
     heldRef.current = result.held;
     setSnapshot(result.shown);
   }, []);
