@@ -7,9 +7,11 @@ export type LiveWalkFrame = {
 };
 
 export function createWalkPoll(): (held: readonly HeldPin[]) => LiveWalkFrame {
-  const engine = getEngine();
-  return (held) => ({
-    engine,
-    view: readWalk(engine.getSnapshot(), mockEngine.getSnapshot(), engine.isRecalled(), held),
-  });
+  return (held) => {
+    const engine = getEngine();
+    return {
+      engine,
+      view: readWalk(engine.getSnapshot(), mockEngine.getSnapshot(), engine.isRecalled(), held),
+    };
+  };
 }
