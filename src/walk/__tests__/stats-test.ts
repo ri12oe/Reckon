@@ -1,9 +1,13 @@
+import { mockEngine } from '@/engine/mock-engine';
+import type { EngineSnapshot } from '@/engine/types';
 import {
   compassPoint,
   formatDistance,
   formatHeading,
   headingIsGyroOnly,
   pathLength,
+  walkReadout,
+  walkSummary,
 } from '@/walk/stats';
 
 const at = (x: number, y: number) => ({ x, y, t: 0 });
@@ -53,5 +57,48 @@ describe('compass headings', () => {
     expect(headingIsGyroOnly(true)).toBe(true);
     expect(headingIsGyroOnly(false)).toBe(false);
     expect(headingIsGyroOnly(undefined)).toBe(false);
+  });
+});
+
+describe('walk readout before a live sample', () => {
+  test('the canned picture stays 12 steps and 7 points, and the readout is empty', () => {
+    const picture = mockEngine.getSnapshot();
+    expect(picture.stepCount).toBe(12);
+    expect(picture.correctedPath).toHaveLength(7);
+    expect(picture.rawPath).toHaveLength(7);
+    expect(pathLength(picture.correctedPath)).toBeCloseTo(9);
+    expect(formatDistance(pathLength(picture.correctedPath))).toBe('9.0 m');
+
+    const readout = walkReadout(picture);
+    expect(readout).toEqual({ stepCount: 0, distance: '0 m', pinCount: 0 });
+    expect(walkSummary(readout)).toBe('0 steps · 0 m · 0 pins');
+  });
+
+  test('a picture that matches the demo reads as empty without the flag', () => {
+    const copy: EngineSnapshot = { ...mockEngine.getSnapshot() };
+    delete copy.isCannedDemo;
+    expect(walkReadout(copy)).toEqual({ stepCount: 0, distance: '0 m', pinCount: 0 });
+  });
+
+  test('an overlaid demo pin still does not count as a dropped pin', () => {
+    const picture = mockEngine.getSnapshot();
+    const overlaid: EngineSnapshot = {
+      ...picture,
+      pins: [...picture.pins, { id: 'extra', x: 1, y: 1, label: 'extra' }],
+    };
+    expect(walkReadout(overlaid)).toEqual({ stepCount: 0, distance: '0 m', pinCount: 0 });
+  });
+
+  test('a live walk keeps its steps, distance, and pins', () => {
+    const live: EngineSnapshot = {
+      rawPath: [at(0, 0), at(3, 4)],
+      correctedPath: [at(0, 0), at(3, 4)],
+      stepCount: 1,
+      heading: 10,
+      pins: [{ id: 'desk', x: 3, y: 4, label: 'desk' }],
+    };
+    const readout = walkReadout(live);
+    expect(readout).toEqual({ stepCount: 1, distance: '5.0 m', pinCount: 1 });
+    expect(walkSummary(readout)).toBe('1 steps · 5.0 m · 1 pin');
   });
 });

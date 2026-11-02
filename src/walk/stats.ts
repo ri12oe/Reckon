@@ -1,4 +1,5 @@
-import type { PathPoint } from '@/engine/types';
+import { isCannedDemo } from '@/engine/mock-engine';
+import type { EngineSnapshot, PathPoint } from '@/engine/types';
 
 const DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
 
@@ -35,4 +36,26 @@ export function formatHeading(heading: number): string {
 
 export function headingIsGyroOnly(gyroOnly: boolean | undefined): boolean {
   return gyroOnly === true;
+}
+
+export type WalkReadout = {
+  stepCount: number;
+  distance: string;
+  pinCount: number;
+};
+
+export function walkReadout(snapshot: EngineSnapshot): WalkReadout {
+  if (isCannedDemo(snapshot)) {
+    return { stepCount: 0, distance: formatDistance(0), pinCount: 0 };
+  }
+  return {
+    stepCount: snapshot.stepCount,
+    distance: formatDistance(pathLength(snapshot.correctedPath)),
+    pinCount: snapshot.pins.length,
+  };
+}
+
+export function walkSummary(readout: WalkReadout): string {
+  const noun = readout.pinCount === 1 ? 'pin' : 'pins';
+  return `${readout.stepCount} steps · ${readout.distance} · ${readout.pinCount} ${noun}`;
 }

@@ -38,7 +38,7 @@ import {
   type WalkPinRead,
 } from '@/walk/pin-drop';
 import { startWalkSensors } from '@/walk/sensors';
-import { formatDistance, formatHeading, headingIsGyroOnly, pathLength } from '@/walk/stats';
+import { formatHeading, headingIsGyroOnly, walkReadout } from '@/walk/stats';
 
 /** Re-read the engine often enough to track a step as it lands. */
 const POLL_MS = 50;
@@ -128,6 +128,7 @@ export default function WalkScreen() {
   };
 
   const heading = Number.isFinite(snapshot.heading) ? snapshot.heading : 0;
+  const readout = walkReadout(snapshot);
 
   const resume = () => {
     resumeLiveWalk();
@@ -148,9 +149,9 @@ export default function WalkScreen() {
       background={<GridBackground />}
     >
       <Glass style={styles.readout}>
-        <Metric label="Steps" value={String(snapshot.stepCount)} live />
+        <Metric label="Steps" value={String(readout.stepCount)} live />
         <View style={[styles.divider, { backgroundColor: theme.glassBorder }]} />
-        <Metric label="Distance" value={formatDistance(pathLength(snapshot.correctedPath))} />
+        <Metric label="Distance" value={readout.distance} />
         <View style={[styles.divider, { backgroundColor: theme.glassBorder }]} />
         <Metric
           label="Heading"
