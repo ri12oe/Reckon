@@ -37,13 +37,12 @@ import {
   framePoints,
   hitTestPin,
   keptFitBounds,
-  makeProjectorFromBounds,
   panBaseline,
   panTo,
   pathForMode,
-  pathToSvg,
   pinchAboutFocal,
   pinchBaseline,
+  placeFrame,
   stageToCanvas,
   wheelZoomFactor,
   zoomAt,
@@ -53,6 +52,7 @@ import {
   type PlacedPin,
   type XY,
 } from '@/map/geometry';
+import { useLiveStroke } from '@/map/live-stroke';
 
 const PIN_RADIUS = 6;
 /** Room for the heading cone around the path ends. */
@@ -83,25 +83,18 @@ export default function FloorMap({ snapshot, mode, summary, toolbar }: Props) {
   const wheelCleanup = useRef<(() => void) | null>(null);
 
   const worldBounds = fitBoundsFor(framePoints(snapshot));
-  const place = useMemo(
-    () =>
-      fitted
-        ? makeProjectorFromBounds(fitted, size.width - ZOOM_GUTTER, size.height, MARKER_PAD)
-        : null,
+  const frame = useMemo(
+    () => (fitted ? placeFrame(fitted, size.width - ZOOM_GUTTER, size.height, MARKER_PAD) : null),
     [fitted, size.height, size.width],
   );
-  const placedPath = useMemo(() => {
-    if (!place) return [];
-    return pathForMode(snapshot, mode)
-      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
-      .map(place);
-  }, [mode, place, snapshot]);
+  const drawn = useLiveStroke(pathForMode(snapshot, mode), frame, `${mode}:`);
+  const placedPath = drawn.placed;
   const placedPins = useMemo(() => {
-    if (!place) return [];
+    if (!frame) return [];
     return snapshot.pins
       .filter((pin) => Number.isFinite(pin.x) && Number.isFinite(pin.y))
-      .map((pin): PlacedPin => ({ id: pin.id, label: pin.label, ...place(pin) }));
-  }, [place, snapshot.pins]);
+      .map((pin): PlacedPin => ({ id: pin.id, label: pin.label, ...frame.place(pin) }));
+  }, [frame, snapshot.pins]);
   const pinsRef = useRef(placedPins);
   const selected = placedPins.find((pin) => pin.id === selectedId) ?? null;
   const selectedX = selected?.x ?? 0;
@@ -169,14 +162,14 @@ export default function FloorMap({ snapshot, mode, summary, toolbar }: Props) {
   };
 
   useLayoutEffect(() => {
-    if (!place) return;
+    if (!frame) return;
     const points = framePoints(snapshot)
       .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
-      .map(place);
+      .map(frame.place);
     const bounds = boundsOf(points);
     if (!bounds) return;
     contentRef.current = { bounds, points };
-  }, [place, snapshot]);
+  }, [frame, snapshot]);
 
   useLayoutEffect(() => {
     labelX.value = selectedX;
@@ -361,7 +354,6 @@ export default function FloorMap({ snapshot, mode, summary, toolbar }: Props) {
     };
   });
 
-  const line = pathToSvg(placedPath);
   const stroke = mode === 'raw' ? theme.pathRaw : theme.pathCorrected;
   const strokeWidth = mode === 'raw' ? 2 : 4;
   const start = placedPath[0] ?? null;
@@ -390,9 +382,9 @@ export default function FloorMap({ snapshot, mode, summary, toolbar }: Props) {
             style={[StyleSheet.absoluteFill, styles.origin, mapStyle]}
           >
             <Canvas style={StyleSheet.absoluteFill}>
-              {line ? (
+              {drawn.path ? (
                 <Path
-                  path={line}
+                  path={drawn.path}
                   color={stroke}
                   style="stroke"
                   strokeWidth={strokeWidth}

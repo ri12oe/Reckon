@@ -68,12 +68,17 @@ export function keptFitBounds(adjusted: boolean, fitted: Bounds | null, next: Bo
   return next;
 }
 
-export function makeProjectorFromBounds(
+export type PlacedFrame = {
+  key: string;
+  place: (point: XY) => XY;
+};
+
+export function placeFrame(
   bounds: Bounds,
   width: number,
   height: number,
   pad = MAP_PAD,
-) {
+): PlacedFrame | null {
   if (width <= pad * 2 || height <= pad * 2) return null;
 
   const spanX = Math.max(bounds.maxX - bounds.minX, 1);
@@ -82,10 +87,22 @@ export function makeProjectorFromBounds(
   const offsetX = (width - spanX * scale) / 2;
   const offsetY = (height - spanY * scale) / 2;
 
-  return (point: XY): XY => ({
-    x: offsetX + (point.x - bounds.minX) * scale,
-    y: offsetY + (bounds.maxY - point.y) * scale,
-  });
+  return {
+    key: [bounds.minX, bounds.maxX, bounds.minY, bounds.maxY, width, height, pad].join(','),
+    place: (point) => ({
+      x: offsetX + (point.x - bounds.minX) * scale,
+      y: offsetY + (bounds.maxY - point.y) * scale,
+    }),
+  };
+}
+
+export function makeProjectorFromBounds(
+  bounds: Bounds,
+  width: number,
+  height: number,
+  pad = MAP_PAD,
+) {
+  return placeFrame(bounds, width, height, pad)?.place ?? null;
 }
 
 export function makeProjector(frame: readonly XY[], width: number, height: number, pad = MAP_PAD) {
@@ -104,6 +121,76 @@ export function pathToSvg(points: readonly XY[]): string {
     path += ` L ${point.x} ${point.y}`;
   }
   return path;
+}
+
+export type Stroke = {
+  key: string;
+  source: readonly XY[];
+  placed: readonly XY[];
+};
+
+function pointsMatch(source: readonly XY[], points: readonly XY[]): boolean {
+  if (source.length !== points.length) return false;
+  for (let i = 0; i < source.length; i++) {
+    const point = points[i];
+    const kept = source[i];
+    if (!point || !kept) return false;
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return false;
+    if (point.x !== kept.x || point.y !== kept.y) return false;
+  }
+  return true;
+}
+
+function pointsAfter(source: readonly XY[], points: readonly XY[]): XY[] | null {
+  const extra: XY[] = [];
+  let index = 0;
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    if (index < source.length) {
+      const kept = source[index];
+      if (!kept || point.x !== kept.x || point.y !== kept.y) return null;
+      index += 1;
+    } else {
+      extra.push(point);
+    }
+  }
+  if (index !== source.length || extra.length === 0) return null;
+  return extra;
+}
+
+function finitePoints(points: readonly XY[]): XY[] {
+  const finite: XY[] = [];
+  for (const point of points) {
+    if (Number.isFinite(point.x) && Number.isFinite(point.y)) finite.push(point);
+  }
+  return finite;
+}
+
+export function drawStroke(
+  points: readonly XY[],
+  key: string,
+  place: (point: XY) => XY,
+  previous: Stroke | null,
+): Stroke {
+  const kept = previous && previous.key === key && previous.source.length > 0 ? previous : null;
+  if (kept && pointsMatch(kept.source, points)) return kept;
+
+  const extra = kept ? pointsAfter(kept.source, points) : null;
+  if (kept && extra) {
+    const placed = extra.map(place);
+    return {
+      key,
+      source: kept.source.concat(extra),
+      placed: kept.placed.concat(placed),
+    };
+  }
+
+  const source = finitePoints(points);
+  if (source.length === 0) {
+    if (previous && previous.key === key && previous.source.length === 0) return previous;
+    return { key, source, placed: [] };
+  }
+  return { key, source, placed: source.map(place) };
 }
 
 export function clampMapScale(scale: number): number {

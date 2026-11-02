@@ -3,6 +3,7 @@ import {
   MAX_MAP_SCALE,
   MIN_MAP_SCALE,
   boundsEqual,
+  boundsOf,
   canvasToStage,
   clampTranslation,
   fitBoundsFor,
@@ -12,8 +13,10 @@ import {
   makeProjector,
   panBaseline,
   panTo,
+  drawStroke,
   pathForMode,
   pathToSvg,
+  placeFrame,
   pinchAboutFocal,
   pinchBaseline,
   stageToCanvas,
@@ -85,6 +88,115 @@ describe('makeProjector', () => {
     const path = pathToSvg([place({ x: 0, y: 0 }), place({ x: 1, y: 0 })]);
     expect(path.startsWith('M ')).toBe(true);
     expect(path).toContain(' L ');
+  });
+
+  test('placeFrame uses the same mapping as makeProjector', () => {
+    const frame = [
+      { x: 0, y: 0 },
+      { x: 2, y: 1 },
+    ];
+    const bounds = boundsOf(frame);
+    const direct = makeProjector(frame, 200, 300, 40);
+    const placed = bounds ? placeFrame(bounds, 200, 300, 40) : null;
+    expect(direct).not.toBeNull();
+    expect(placed).not.toBeNull();
+    if (!direct || !placed) return;
+    expect(placed.place({ x: 1, y: 1 })).toEqual(direct({ x: 1, y: 1 }));
+  });
+});
+
+describe('drawStroke', () => {
+  const place = (point: { x: number; y: number }) => ({ x: point.x * 2 + 1, y: 10 - point.y });
+
+  test('an unchanged poll keeps the same stroke and does not project', () => {
+    const points = Array.from({ length: 2000 }, (_, i) => ({ x: i, y: i % 5 }));
+    let calls = 0;
+    const count = (point: { x: number; y: number }) => {
+      calls += 1;
+      return place(point);
+    };
+    const first = drawStroke(points, 'fit', count, null);
+    expect(calls).toBe(2000);
+    expect(pathToSvg(first.placed)).toBe(pathToSvg(points.map(place)));
+
+    calls = 0;
+    const again = drawStroke(
+      points.map((point) => ({ ...point })),
+      'fit',
+      count,
+      first,
+    );
+    expect(again).toBe(first);
+    expect(calls).toBe(0);
+  });
+
+  test('a longer path projects only the points added since the last stroke', () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 1, y: 2 },
+    ];
+    let calls = 0;
+    const count = (point: { x: number; y: number }) => {
+      calls += 1;
+      return place(point);
+    };
+    const first = drawStroke(points, 'fit', count, null);
+    calls = 0;
+    const grown = [...points.map((point) => ({ ...point })), { x: 3, y: 2 }];
+    const second = drawStroke(grown, 'fit', count, first);
+    expect(calls).toBe(1);
+    expect(second).not.toBe(first);
+    expect(second.placed.slice(0, first.placed.length)).toEqual(first.placed);
+    expect(second.placed[0]).toBe(first.placed[0]);
+    expect(pathToSvg(second.placed)).toBe(pathToSvg(grown.map(place)));
+  });
+
+  test('a rewritten prefix projects the whole path again', () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 2, y: 0 },
+    ];
+    let calls = 0;
+    const count = (point: { x: number; y: number }) => {
+      calls += 1;
+      return place(point);
+    };
+    const first = drawStroke(points, 'fit', count, null);
+    calls = 0;
+    const rewritten = [
+      { x: 0, y: 0 },
+      { x: 1, y: 4 },
+      { x: 2, y: 0 },
+      { x: 3, y: 0 },
+    ];
+    const second = drawStroke(rewritten, 'fit', count, first);
+    expect(calls).toBe(rewritten.length);
+    expect(second.placed[0]).not.toBe(first.placed[0]);
+    expect(pathToSvg(second.placed)).toBe(pathToSvg(rewritten.map(place)));
+  });
+
+  test('a new projector key projects every point even when the coordinates match', () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 2, y: 1 },
+    ];
+    let calls = 0;
+    const count = (point: { x: number; y: number }) => {
+      calls += 1;
+      return place(point);
+    };
+    const first = drawStroke(points, 'overview', count, null);
+    calls = 0;
+    const followed = drawStroke(
+      points.map((point) => ({ ...point })),
+      'follow',
+      count,
+      first,
+    );
+    expect(followed).not.toBe(first);
+    expect(calls).toBe(points.length);
   });
 });
 
