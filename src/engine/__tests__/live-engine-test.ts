@@ -509,6 +509,41 @@ describe('precomputed steps and headings', () => {
     expect(engine.getSnapshot().rawPath[1]).toEqual({ x: 0, y: 0.75, t: 100 });
   });
 
+  test('15 m over 20 detected steps is 0.75 m/step; dividing by 10 would be 1.5 and end at 30 m', () => {
+    const engine = createLiveEngine();
+    for (let i = 0; i < 20; i++) engine.pushStep({ t: (i + 1) * 400, heading: 90 });
+
+    const before = engine.getSnapshot();
+    expect(before.stepCount).toBe(20);
+    expect(before.rawPath[20]!.x).toBe(15);
+    expect(before.rawPath[20]!.t).toBe(8000);
+    expect(engine.getStepLength()).toBe(0.75);
+
+    expect(engine.calibrateStepLength(15)).toEqual({
+      stepLengthM: 0.75,
+      distanceM: 15,
+      stepCount: 20,
+    });
+
+    const after = engine.getSnapshot();
+    expect(after.stepCount).toBe(20);
+    expect(engine.getStepLength()).toBe(0.75);
+    expect(after.rawPath[0]).toEqual({ x: 0, y: 0, t: 0 });
+    expect(after.rawPath[20]!.x).toBe(15);
+    expect(after.rawPath[20]!.y).toBeCloseTo(0, 12);
+    expect(after.rawPath[20]!.t).toBe(8000);
+
+    const dividedByTen = createLiveEngine();
+    for (let i = 0; i < 20; i++) dividedByTen.pushStep({ t: (i + 1) * 400, heading: 90 });
+    expect(dividedByTen.calibrateStepLength(15, 10)).toEqual({
+      stepLengthM: 1.5,
+      distanceM: 15,
+      stepCount: 10,
+    });
+    expect(dividedByTen.getSnapshot().rawPath[20]!.x).toBe(30);
+    expect(dividedByTen.getStepLength()).toBe(1.5);
+  });
+
   test('calibrateStepLength rescales the measured course; a later setStepLength does not', () => {
     const engine = createLiveEngine({ stepLengthM: 1 });
     for (const t of [100, 200, 300, 400]) engine.pushStep({ t, heading: 90 });
