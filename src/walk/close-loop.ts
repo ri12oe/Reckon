@@ -1,4 +1,4 @@
-import type { EngineSnapshot, LiveFloorwalkerEngine } from '@/engine';
+import { isCannedDemo, type EngineSnapshot, type LiveFloorwalkerEngine } from '@/engine';
 
 type LoopEngine = Pick<LiveFloorwalkerEngine, 'setDrift' | 'isRecalled'>;
 
@@ -16,17 +16,16 @@ export type LoopRelease = {
   readAgain: boolean;
 };
 
+export function showBackAtStart(shown: EngineSnapshot): boolean {
+  return !isCannedDemo(shown) && shown.stepCount > 0;
+}
+
 /**
  * The walker says this end is the start. Later snapshots spread the gap
  * back along the corrected path. A canned demo or a recalled floor has
  * no live end to close, and arming the flag there would close the next
  * live steps instead.
  */
-/** The screen offers the control for any snapshot that is not a saved floor. */
-export function showBackAtStart(_shown: EngineSnapshot): boolean {
-  return true;
-}
-
 export function assertBackAtStart(engine: LoopEngine, shown: EngineSnapshot): LoopHold | null {
   if (shown.isCannedDemo || engine.isRecalled()) return null;
   engine.setDrift({ closeLoop: true });
