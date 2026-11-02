@@ -115,7 +115,7 @@ describe('magnetic heading', () => {
 });
 
 describe('fuseHeading', () => {
-  test('empty, non-finite, and a single east fix', () => {
+  test('empty, non-finite, and a single east sample does not fix (before: latched 90°)', () => {
     expect(fuseHeading([], [])).toEqual([]);
 
     const fused = fuseHeading(
@@ -134,8 +134,8 @@ describe('fuseHeading', () => {
     expect(fused).toHaveLength(1);
     expect(fused[0]).toMatchObject({
       t: 0,
-      heading: 90,
-      gyroOnly: false,
+      heading: 0,
+      gyroOnly: true,
       interference: false,
       magneticHeading: 90,
       magnitudeUt: 50,
@@ -191,7 +191,7 @@ describe('fuseHeading', () => {
     });
   });
 
-  test('level cardinals: 51 samples at 50 Hz stay on 0, 90, 180, and 270', () => {
+  test('level cardinals: 51 samples at 50 Hz lock at 400 ms (before: locked at 0 ms)', () => {
     const cases = [
       { heading: 0, field: north() },
       { heading: 90, field: east() },
@@ -205,16 +205,21 @@ describe('fuseHeading', () => {
       expect(times).toHaveLength(51);
       expect(fused).toHaveLength(51);
       for (const sample of fused) {
-        expect(sample.heading).toBe(heading);
         expect(sample.magneticHeading).toBe(heading);
         expect(sample.magnitudeUt).toBe(50);
         expect(sample.interference).toBe(false);
-        expect(sample.gyroOnly).toBe(false);
+        if (sample.t < DEFAULT_HEADING_FUSION_CONFIG.recoverHoldMs) {
+          expect(sample.heading).toBe(0);
+          expect(sample.gyroOnly).toBe(true);
+        } else {
+          expect(sample.heading).toBe(heading);
+          expect(sample.gyroOnly).toBe(false);
+        }
       }
     }
   });
 
-  test('3 Hz cross-axis noise: compass swings 75.10°–104.90°, fused stays 89.46°–90.53°', () => {
+  test('3 Hz cross-axis noise locks at 480 ms; compass 75.10°–104.90°, fused 89.35°–90.49° (before an instant lock: 89.46°–90.53°)', () => {
     const times = clock(0, 8000);
     const fused = fuseHeading(
       gyroAt(times, 0),
@@ -237,12 +242,21 @@ describe('fuseHeading', () => {
 
     expect(times).toHaveLength(401);
     expect(settled).toHaveLength(101);
+    expect(at(fused, 0)).toMatchObject({
+      heading: 0,
+      magneticHeading: 90,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(at(fused, 460).gyroOnly).toBe(true);
+    expect(at(fused, 480).gyroOnly).toBe(false);
+    expect(at(fused, 480).heading).toBeCloseTo(at(fused, 480).magneticHeading ?? 0, 6);
     expect(magMin).toBeCloseTo(75.0967, 4);
     expect(magMax).toBeCloseTo(104.9033, 4);
-    expect(fusedMin).toBeCloseTo(89.459, 3);
-    expect(fusedMax).toBeCloseTo(90.5308, 4);
+    expect(fusedMin).toBeCloseTo(89.352446, 6);
+    expect(fusedMax).toBeCloseTo(90.494339, 6);
     expect(Math.max(90 - magMin, magMax - 90)).toBeCloseTo(14.9033, 4);
-    expect(Math.max(90 - fusedMin, fusedMax - 90)).toBeLessThan(0.55);
+    expect(Math.max(90 - fusedMin, fusedMax - 90)).toBeCloseTo(0.647554, 6);
     expect(settled.every((sample) => !sample.interference && !sample.gyroOnly)).toBe(true);
   });
 
@@ -371,7 +385,13 @@ describe('fuseHeading', () => {
       magneticHeading: 0,
       magnitudeUt: 50,
       interference: false,
+      gyroOnly: true,
+    });
+    expect(at(fused, 400)).toMatchObject({
+      heading: 0,
+      magneticHeading: 0,
       gyroOnly: false,
+      interference: false,
     });
     expect(at(fused, 1000).heading).toBeCloseTo(0, 6);
     expect(at(fused, 1000).magneticHeading).toBeCloseTo(240, 5);
@@ -399,7 +419,7 @@ describe('fuseHeading', () => {
     expect(at(fused, 4000).interference).toBe(false);
   });
 
-  test('3.0°/s for 10.0 s: no mag or 200 µT ends at 30.0°; a healthy field ends near 0.86°', () => {
+  test('3.0°/s for 10.0 s: no mag or 200 µT ends at 30.0°; a healthy field ends near 0.93° (before an instant lock: 0.86°)', () => {
     const times = clock(0, 10000);
     const gyro = gyroAt(times, 3);
     const gyroOnly = fuseHeading(gyro, []);
@@ -425,14 +445,19 @@ describe('fuseHeading', () => {
     expect(at(corrected, 0)).toMatchObject({
       heading: 0,
       interference: false,
-      gyroOnly: false,
+      gyroOnly: true,
       magnitudeUt: 50,
     });
-    expect(at(corrected, 10000).heading).toBeCloseTo(0.8578, 3);
+    expect(at(corrected, 400)).toMatchObject({
+      heading: 0,
+      interference: false,
+      gyroOnly: false,
+    });
+    expect(at(corrected, 10000).heading).toBeCloseTo(0.92745, 5);
     expect(at(corrected, 10000)).toMatchObject({ interference: false, gyroOnly: false });
   });
 
-  test('magnetometer at 10 Hz still bounds the same 3.0°/s bias, near 0.84° at 10.0 s', () => {
+  test('magnetometer at 10 Hz still bounds the same 3.0°/s bias, near 0.91° at 10.0 s (before an instant lock: 0.84°)', () => {
     const gyroTimes = clock(0, 10000, 20);
     const magTimes = clock(0, 10000, 100);
     const fused = fuseHeading(gyroAt(gyroTimes, 3), magAt(magTimes, north()));
@@ -441,26 +466,37 @@ describe('fuseHeading', () => {
     expect(magTimes).toHaveLength(101);
     expect(fused).toHaveLength(501);
     expect(at(fused, 0).heading).toBe(0);
+    expect(at(fused, 20).heading).toBeCloseTo(0.06, 6);
     expect(at(fused, 20)).toMatchObject({
       magneticHeading: null,
       magnitudeUt: null,
-      gyroOnly: false,
+      gyroOnly: true,
       interference: false,
     });
-    expect(at(fused, 10000).heading).toBeCloseTo(0.8419, 3);
+    expect(at(fused, 400)).toMatchObject({ heading: 0, gyroOnly: false, interference: false });
+    expect(at(fused, 10000).heading).toBeCloseTo(0.9102, 4);
     expect(at(fused, 10000).magneticHeading).toBe(0);
   });
 
-  test('heading wraps through north: 350° plus 30°/s for 1 s is 20°', () => {
+  test('a 350° field turning at 30°/s locks at 2° after 400 ms and is 20° at 1 s (before: 350° at 0 ms, 0.2° at 340 ms)', () => {
     const times = clock(0, 1000);
     const fused = fuseHeading(
       gyroAt(times, 30),
       magAt(times, (t) => field(350 + 30 * (t / 1000))),
     );
 
-    expect(at(fused, 0).heading).toBeCloseTo(350, 5);
-    expect(at(fused, 320).heading).toBeCloseTo(359.6, 3);
-    expect(at(fused, 340).heading).toBeCloseTo(0.2, 3);
+    expect(at(fused, 0)).toMatchObject({
+      heading: 0,
+      magneticHeading: 350,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(at(fused, 320).heading).toBeCloseTo(9.6, 4);
+    expect(at(fused, 320).magneticHeading).toBeCloseTo(359.6, 3);
+    expect(at(fused, 340).heading).toBeCloseTo(10.2, 4);
+    expect(at(fused, 340).magneticHeading).toBeCloseTo(0.2, 3);
+    expect(at(fused, 400)).toMatchObject({ gyroOnly: false, interference: false });
+    expect(at(fused, 400).heading).toBeCloseTo(2, 4);
     expect(at(fused, 1000).heading).toBeCloseTo(20, 4);
     expect(fused.every((sample) => sample.heading >= 0 && sample.heading < 360)).toBe(true);
     expect(fused.every((sample) => !sample.interference)).toBe(true);
@@ -560,7 +596,7 @@ describe('fuseHeading', () => {
     expect(at(dropped, 151).heading).toBe(0);
   });
 
-  test('mag before a trusted level frame stays at 0° with no hold; the same east field acquires 90° at 500 ms', () => {
+  test('mag before a trusted level frame stays at 0° with no hold; the same east field acquires 90° at 900 ms (before: 500 ms)', () => {
     const early = clock(0, 480);
     const late = clock(500, 1000);
     const fused = fuseHeading(gyroAt(clock(0, 1000), 0), [
@@ -584,6 +620,18 @@ describe('fuseHeading', () => {
       interference: false,
     });
     expect(at(fused, 500)).toMatchObject({
+      heading: 0,
+      magneticHeading: 90,
+      magnitudeUt: 50,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(at(fused, 880)).toMatchObject({
+      heading: 0,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(at(fused, 900)).toMatchObject({
       heading: 90,
       magneticHeading: 90,
       magnitudeUt: 50,
@@ -635,7 +683,8 @@ describe('fuseHeading', () => {
       [...gyro, { t: 10000, yawRate: 0 }, { t: 11500, yawRate: yaw(90) }],
       mag,
     );
-    const bias = 3 * (1 - Math.exp(-10 / 5));
+    const learnedSeconds = 10 - DEFAULT_HEADING_FUSION_CONFIG.recoverHoldMs / 1000;
+    const bias = 3 * (1 - Math.exp(-learnedSeconds / DEFAULT_HEADING_FUSION_CONFIG.biasTauSeconds));
     const wrapped = (deg: number) => {
       const turn = ((deg % 360) + 360) % 360;
       return turn === 0 ? 0 : turn;

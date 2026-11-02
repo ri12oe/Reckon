@@ -1,5 +1,10 @@
 import { getEngine, mockEngine } from '@/engine';
-import { fuseHeading, type GyroSample, type MagSample } from '@/engine/heading-fusion';
+import {
+  DEFAULT_HEADING_FUSION_CONFIG,
+  fuseHeading,
+  type GyroSample,
+  type MagSample,
+} from '@/engine/heading-fusion';
 import {
   DEFAULT_PATH_INTEGRATION_CONFIG,
   DEFAULT_STEP_LENGTH_M,
@@ -351,7 +356,14 @@ describe('integratePath', () => {
     const fused = fuseHeading(gyro, mag);
 
     expect(detected.map((step) => step.t)).toEqual(planted);
-    expect(fused.every((sample) => sample.heading === 90)).toBe(true);
+    const hold = DEFAULT_HEADING_FUSION_CONFIG.recoverHoldMs;
+    expect(planted[0]).toBeGreaterThanOrEqual(hold);
+    expect(
+      fused.every(
+        (sample) =>
+          sample.heading === (sample.t < hold ? 0 : 90) && sample.gyroOnly === sample.t < hold,
+      ),
+    ).toBe(true);
 
     const path = integratePath(detected, fused, { stepLength: 0.7 });
 

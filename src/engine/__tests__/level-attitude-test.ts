@@ -524,12 +524,13 @@ describe('mag before trusted down', () => {
     expect(magneticHeadingDeg(flat!.x, flat!.y)).toBeCloseTo(140.3911, 4);
     expect(magneticHeadingDeg(trusted!.x, trusted!.y)).toBeCloseTo(90, 8);
 
+    const trustedTimes = Array.from({ length: 21 }, (_, index) => 420 + index * 20);
     const fused = fuseHeading(
-      [0, 400, 420].map((t) => ({ t, yawRate: 0 })),
+      [0, 400, ...trustedTimes].map((t) => ({ t, yawRate: 0 })),
       [
         { t: 0, ...flat!, levelReady: false },
         { t: 400, ...flat!, levelReady: false },
-        { t: 420, ...trusted! },
+        ...trustedTimes.map((t) => ({ t, ...trusted! })),
       ],
     );
     expect(fusedAt(fused, 0)).toMatchObject({
@@ -545,6 +546,18 @@ describe('mag before trusted down', () => {
       interference: false,
     });
     expect(fusedAt(fused, 420)).toMatchObject({
+      heading: 0,
+      magneticHeading: 90,
+      magnitudeUt: expect.closeTo(50, 8),
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(fusedAt(fused, 800)).toMatchObject({
+      heading: 0,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(fusedAt(fused, 820)).toMatchObject({
       heading: 90,
       magneticHeading: 90,
       magnitudeUt: expect.closeTo(50, 8),
@@ -577,15 +590,23 @@ describe('mag before trusted down', () => {
     };
     emitPose(420, 0);
     const acquired = engine.getSnapshot();
-    expect(acquired.heading).toBeCloseTo(90, 5);
-    expect(acquired.gyroOnly).toBe(false);
+    expect(acquired.heading).toBeCloseTo(0, 5);
+    expect(acquired.gyroOnly).toBe(true);
 
     const stepCenters = [1000, 1500, 2000];
+    let locked = false;
     for (let t = 440; t <= 2200; t += DT_MS) {
       let bump = 0;
       for (const center of stepCenters) bump += hann(t, center, STEP_AMP, STEP_HALF_MS);
       emitPose(t, bump);
+      if (t === 820) {
+        const snapshot = engine.getSnapshot();
+        expect(snapshot.heading).toBeCloseTo(90, 5);
+        expect(snapshot.gyroOnly).toBe(false);
+        locked = true;
+      }
     }
+    expect(locked).toBe(true);
     const walked = engine.getSnapshot();
     const end = walked.rawPath[walked.rawPath.length - 1]!;
     expect(walked.stepCount).toBe(3);
