@@ -1,3 +1,4 @@
+import { isCannedDemo } from '@/engine/mock-engine';
 import type { EngineSnapshot, PathPoint } from '@/engine/types';
 
 const DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
@@ -43,8 +44,10 @@ export type WalkReadout = {
   pinCount: number;
 };
 
-/** Step, distance, and pin counts the Walk and Map readouts show. */
 export function walkReadout(snapshot: EngineSnapshot): WalkReadout {
+  if (isCannedDemo(snapshot)) {
+    return { stepCount: 0, distance: formatDistance(0), pinCount: 0 };
+  }
   return {
     stepCount: snapshot.stepCount,
     distance: formatDistance(pathLength(snapshot.correctedPath)),

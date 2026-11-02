@@ -74,6 +74,12 @@ describe('walk readout before a live sample', () => {
     expect(walkSummary(readout)).toBe('0 steps · 0 m · 0 pins');
   });
 
+  test('a picture that matches the demo reads as empty without the flag', () => {
+    const copy: EngineSnapshot = { ...mockEngine.getSnapshot() };
+    delete copy.isCannedDemo;
+    expect(walkReadout(copy)).toEqual({ stepCount: 0, distance: '0 m', pinCount: 0 });
+  });
+
   test('an overlaid demo pin still does not count as a dropped pin', () => {
     const picture = mockEngine.getSnapshot();
     const overlaid: EngineSnapshot = {
