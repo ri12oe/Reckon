@@ -20,6 +20,7 @@ import {
 import { lightHaptic } from '@/haptics';
 import { useTheme } from '@/hooks/use-theme';
 import { walkPill } from '@/sensor-start';
+import { assertBackAtStart, releaseBackAtStart, type LoopHold } from '@/walk/close-loop';
 import { createWalkPoll } from '@/walk/live-poll';
 import {
   commitWalkPins,
@@ -41,6 +42,7 @@ export default function WalkScreen() {
   const stepsRef = useRef(snapshot.stepCount);
   const droppedRef = useRef(0);
   const heldRef = useRef<HeldPin[]>([]);
+  const loopHold = useRef<LoopHold | null>(null);
 
   const applyPinRead = useCallback((engine: LiveFloorwalkerEngine, result: WalkPinRead) => {
     commitWalkPins(engine, result);
@@ -54,7 +56,10 @@ export default function WalkScreen() {
       let stopped = false;
 
       const read = () => {
-        const frame = poll(heldRef.current);
+        let frame = poll(heldRef.current);
+        const released = releaseBackAtStart(frame.engine, loopHold.current, frame.view.shown);
+        loopHold.current = released.hold;
+        if (released.readAgain) frame = poll(heldRef.current);
         const next = frame.view.shown;
         if (next.stepCount > stepsRef.current) lightHaptic();
         stepsRef.current = next.stepCount;
@@ -77,6 +82,22 @@ export default function WalkScreen() {
       };
     }, [applyPinRead]),
   );
+
+  const backAtStart = () => {
+    const engine = getEngine();
+    const hold = assertBackAtStart(engine, engine.getSnapshot());
+    if (!hold) return;
+    loopHold.current = hold;
+    applyPinRead(
+      engine,
+      readWalk(
+        engine.getSnapshot(),
+        mockEngine.getSnapshot(),
+        engine.isRecalled(),
+        heldRef.current,
+      ),
+    );
+  };
 
   const dropPin = () => {
     const engine = getEngine();
@@ -136,6 +157,14 @@ export default function WalkScreen() {
         </LegendItem>
       </Glass>
       <SkiaWalk snapshot={snapshot} follow={follow} />
+      {active ? null : (
+        <Button
+          label="Back at start"
+          variant="glass"
+          accessibilityHint="Pulls the end of this walk back to the start"
+          onPress={backAtStart}
+        />
+      )}
       <View style={styles.actions}>
         {active ? (
           <Button
