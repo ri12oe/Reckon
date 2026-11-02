@@ -518,11 +518,11 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       });
     },
     stopSensors() {
-      generation += 1;
       const current = feed;
       feed = null;
       starting = null;
       current?.stop();
+      generation += 1;
     },
   };
 

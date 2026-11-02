@@ -84,6 +84,7 @@ export type {
 
 export {
   DEFAULT_HEADING_FUSION_CONFIG,
+  MAX_YAW_GAP_MS,
   fuseHeading,
   magneticFieldMagnitude,
   magneticHeadingDeg,

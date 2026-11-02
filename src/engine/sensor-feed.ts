@@ -150,6 +150,10 @@ export async function startSensorFeed(
   const readTime = createSensorClock(options?.nowMs ?? (() => Date.now()));
   const state: FeedState = { stopped: false, subscriptions: [] };
   const attitude = createAttitudeTracker(resolveAccelAtRest(options?.accelAtRest));
+  let sessionT: number | null = null;
+  const noteSession = (t: number) => {
+    if (sessionT === null || t > sessionT) sessionT = t;
+  };
 
   const feed: SensorFeed = {
     stop() {
@@ -157,22 +161,34 @@ export async function startSensorFeed(
       state.stopped = true;
       for (const subscription of state.subscriptions) subscription.remove();
       state.subscriptions.length = 0;
+      if (sessionT === null) return;
+      sink.pushGyro({ t: sessionT, brake: true });
     },
   };
 
   await subscribe(sensors.Accelerometer, intervalMs, state, (measurement) => {
     const observed = observeAccel(attitude, measurement, readTime);
     if (!observed) return;
-    if (observed.hold) sink.pushGyro(observed.hold);
-    if (observed.accel) sink.pushAccel(observed.accel);
+    if (observed.hold) {
+      noteSession(observed.hold.t);
+      sink.pushGyro(observed.hold);
+    }
+    if (observed.accel) {
+      noteSession(observed.accel.t);
+      sink.pushAccel(observed.accel);
+    }
   });
   await subscribe(sensors.Gyroscope, intervalMs, state, (measurement) => {
     const sample = gyroFromDevice(attitude, measurement, readTime);
-    if (sample) sink.pushGyro(sample);
+    if (!sample) return;
+    noteSession(sample.t);
+    sink.pushGyro(sample);
   });
   await subscribe(sensors.Magnetometer, intervalMs, state, (measurement) => {
     const sample = magFromDevice(attitude, measurement, readTime);
-    if (sample) sink.pushMag(sample);
+    if (!sample) return;
+    noteSession(sample.t);
+    sink.pushMag(sample);
   });
 
   return feed;

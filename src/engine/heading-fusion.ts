@@ -18,9 +18,9 @@
  * `yawRate` is radians per second, positive clockwise.
  * Streams may be unsynchronized; both are sorted by timestamp.
  *
- * Gyro rate is zero-order held: the rate on a sample applies until the
- * next gyroscope sample. At a shared timestamp the gyro is integrated
- * first, then the magnetometer may correct.
+ * Gyro rate is zero-order held until the next sample, up to
+ * `MAX_YAW_GAP_MS`. At a shared timestamp the gyro is integrated first,
+ * then the magnetometer may correct.
  *
  * Not in this module: step length, path integration, loop-closure drift.
  */
@@ -104,6 +104,9 @@ export type HeadingFusionConfig = {
   biasTauSeconds: number;
 };
 
+/** A longer gap between samples adds no heading and is not a bias sample. */
+export const MAX_YAW_GAP_MS = 2000;
+
 export const DEFAULT_HEADING_FUSION_CONFIG: HeadingFusionConfig = {
   tauSeconds: 1.5,
   magnitudeMinUt: 20,
@@ -174,6 +177,7 @@ type FusionState = {
   yaw: HeldYaw;
   biasDegPerSec: number;
   rawYawAccumDeg: number;
+  voidBias: boolean;
   lastT: number | null;
   phase: Phase;
   baselineUt: number | null;
@@ -190,6 +194,7 @@ function createState(initialHeadingDeg: number): FusionState {
     yaw: { kind: 'measured', degPerSec: 0 },
     biasDegPerSec: 0,
     rawYawAccumDeg: 0,
+    voidBias: false,
     lastT: null,
     phase: { kind: 'open' },
     baselineUt: null,
@@ -236,12 +241,17 @@ function step(
   config: HeadingFusionConfig,
 ): FusedHeading {
   if (state.lastT !== null && t > state.lastT) {
-    const dtSeconds = (t - state.lastT) / 1000;
-    state.heading = wrap360(
-      state.heading + appliedYawDegPerSec(state.yaw, state.biasDegPerSec) * dtSeconds,
-    );
-    if (state.phase.kind === 'live' && state.yaw.kind === 'measured') {
-      state.rawYawAccumDeg += state.yaw.degPerSec * dtSeconds;
+    const dtMs = t - state.lastT;
+    if (dtMs > MAX_YAW_GAP_MS) {
+      state.voidBias = true;
+    } else {
+      const dtSeconds = dtMs / 1000;
+      state.heading = wrap360(
+        state.heading + appliedYawDegPerSec(state.yaw, state.biasDegPerSec) * dtSeconds,
+      );
+      if (state.phase.kind === 'live' && state.yaw.kind === 'measured') {
+        state.rawYawAccumDeg += state.yaw.degPerSec * dtSeconds;
+      }
     }
   }
   state.lastT = t;
@@ -376,6 +386,7 @@ function acquire(
   state.heading = magneticHeading;
   state.phase = { kind: 'live' };
   state.rawYawAccumDeg = 0;
+  state.voidBias = false;
   state.baselineUt = magnitudeUt;
   state.lastMagHeading = magneticHeading;
   state.headingMark = magneticHeading;
@@ -435,6 +446,11 @@ function learnBias(
   magneticHeading: number,
   config: HeadingFusionConfig,
 ): void {
+  if (state.voidBias) {
+    state.voidBias = false;
+    state.rawYawAccumDeg = 0;
+    return;
+  }
   if (state.lastTrustedT === null || state.lastMagHeading === null) return;
   const dt = (t - state.lastTrustedT) / 1000;
   if (!(dt > 0)) return;
@@ -636,6 +652,7 @@ function cloneState(state: FusionState): FusionState {
         : { kind: 'measured', degPerSec: state.yaw.degPerSec },
     biasDegPerSec: state.biasDegPerSec,
     rawYawAccumDeg: state.rawYawAccumDeg,
+    voidBias: state.voidBias,
     lastT: state.lastT,
     phase: { kind: state.phase.kind },
     baselineUt: state.baselineUt,
