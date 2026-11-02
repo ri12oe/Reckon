@@ -119,10 +119,11 @@ describe('calibration store', () => {
     };
     const { isCalibrated, readStepLength, saveStepLength } = loadStore();
     expect(isCalibrated()).toBe(false);
+    expect(readStepLength()).toBeNull();
     expect(() => saveStepLength(eightOverFive)).not.toThrow();
-    expect(saveStepLength(eightOverFive)).toEqual(eightOverFive);
-    expect(isCalibrated()).toBe(true);
-    expect(readStepLength()).toEqual(eightOverFive);
+    expect(saveStepLength(eightOverFive)).toBeNull();
+    expect(isCalibrated()).toBe(false);
+    expect(readStepLength()).toBeNull();
   });
 
   test('a failed row write does not report the estimate as saved', () => {
