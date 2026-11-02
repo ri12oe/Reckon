@@ -601,7 +601,10 @@ describe('sensor feed into the live engine', () => {
     expect(engine.getSnapshot().sensorStartFailed).toBeUndefined();
   });
 
-  test('a failed start is not a live walk while a recalled snapshot is showing', async () => {
+  test('startSensors while recalled attaches nothing and samples do not survive clearRecall', async () => {
+    const engine = createLiveEngine({ stepLengthM: 1 });
+    engine.pushStep({ t: 500, heading: 0 });
+    const before = engine.getSnapshot();
     const saved: EngineSnapshot = {
       rawPath: [
         { x: 0, y: 0, t: 0 },
@@ -615,50 +618,89 @@ describe('sensor feed into the live engine', () => {
       heading: 12,
       pins: [],
     };
-    const sensors = motionSensors({
-      Accelerometer: fakeSensor({ granted: false }),
-      Gyroscope: fakeSensor({ granted: false }),
-      Magnetometer: fakeSensor({ granted: false }),
-    });
-    const engine = createLiveEngine();
     engine.recallSnapshot(saved);
+    const sensors = motionSensors();
 
     const started = await engine.startSensors({ sensors });
-    engine.pushStep({ t: 500, heading: 90 });
+    for (const sample of deviceVerticalWalk(PLANTED, 3, 160)) sensors.Accelerometer.emit(sample);
+    engine.pushAccel({ t: 800, x: 0, y: 0, z: G });
+    engine.pushGyro({ t: 800, yawRate: 0.2 });
+    engine.pushMag({ t: 800, x: 1, y: 2, z: 3 });
+    engine.pushStep({ t: 900, heading: 90 });
+    engine.pushHeading({ t: 900, heading: 180 });
     const during = engine.getSnapshot();
-    const duringActive = engine.sensorsActive();
-    engine.clearRecall();
-    const after = engine.getSnapshot();
 
     expect({
       started,
-      duringActive,
+      active: engine.sensorsActive(),
+      accelListeners: sensors.Accelerometer.addListener.mock.calls.length,
+      gyroListeners: sensors.Gyroscope.addListener.mock.calls.length,
+      magListeners: sensors.Magnetometer.addListener.mock.calls.length,
+      permissionAsks: sensors.Accelerometer.requestPermissionsAsync.mock.calls.length,
       duringStepCount: during.stepCount,
       duringHeading: during.heading,
       duringFault: during.sensorStartFailed ?? null,
-      afterStepCount: after.stepCount,
-      afterHeading: after.heading,
-      afterFault: after.sensorStartFailed ?? null,
-      afterActive: engine.sensorsActive(),
     }).toEqual({
-      started: { ok: false, reason: 'permission' },
-      duringActive: false,
+      started: { ok: false, reason: 'cancelled' },
+      active: false,
+      accelListeners: 0,
+      gyroListeners: 0,
+      magListeners: 0,
+      permissionAsks: 0,
       duringStepCount: 4,
       duringHeading: 12,
-      duringFault: 'permission',
-      afterStepCount: 1,
-      afterHeading: 90,
-      afterFault: 'permission',
-      afterActive: false,
+      duringFault: null,
     });
+
+    engine.clearRecall();
+    expect(engine.getSnapshot()).toEqual(before);
+    expect(engine.sensorsActive()).toBe(false);
     expect(engine.snapshotForSave().sensorStartFailed).toBeUndefined();
-    expect(engine.snapshotForSave().stepCount).toBe(1);
-    engine.reset();
-    expect(engine.getSnapshot().sensorStartFailed).toBeUndefined();
-    expect(engine.isRecalled()).toBe(false);
+
+    engine.pushStep({ t: 1200, heading: 0 });
+    expect(engine.getSnapshot().stepCount).toBe(before.stepCount + 1);
+
     engine.recallSnapshot({ ...saved, sensorStartFailed: 'error' });
     expect(engine.getSnapshot().sensorStartFailed).toBeUndefined();
     expect(engine.getSnapshot().stepCount).toBe(4);
+  });
+
+  test('a feed already running keeps dropping samples until clearRecall', async () => {
+    const engine = createLiveEngine({ stepLengthM: 1 });
+    const sensors = motionSensors();
+    await engine.startSensors({ sensors });
+    engine.pushStep({ t: 500, heading: 0 });
+    const before = engine.getSnapshot();
+    const saved: EngineSnapshot = {
+      rawPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 2, y: 0, t: 400 },
+      ],
+      correctedPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 2, y: 0, t: 400 },
+      ],
+      stepCount: 3,
+      heading: 45,
+      pins: [],
+    };
+
+    engine.recallSnapshot(saved);
+    sensors.Gyroscope.emit({ x: 0, y: 0, z: -Math.PI / 2, timestamp: 0.8 });
+    engine.pushStep({ t: 900, heading: 90 });
+    const again = await engine.startSensors({ sensors });
+
+    expect(again).toEqual({ ok: true });
+    expect(engine.sensorsActive()).toBe(true);
+    expect(sensors.Accelerometer.addListener).toHaveBeenCalledTimes(1);
+    expect(engine.getSnapshot().stepCount).toBe(3);
+
+    engine.clearRecall();
+    expect(engine.getSnapshot()).toEqual(before);
+    sensors.Gyroscope.emit({ x: 0, y: 0, z: 0, timestamp: 1.2 });
+    engine.pushStep({ t: 1300, heading: 0 });
+    expect(engine.getSnapshot().stepCount).toBe(before.stepCount + 1);
+    engine.stopSensors();
   });
 
   test('an Expo listen failure resolves as an error instead of a live session', async () => {
