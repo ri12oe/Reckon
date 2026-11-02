@@ -575,11 +575,15 @@ describe('fuseHeading', () => {
     const gyro = gyroAt(times, 3);
     const mag = magAt(times, north());
     const brake = fuseHeading(
-      [...gyro, { t: 10000, brake: true }, { t: 12000, yawRate: yaw(90) }],
+      [...gyro, { t: 10000, brake: true }, { t: 10150, yawRate: yaw(90) }],
       mag,
     );
     const still = fuseHeading(
-      [...gyro, { t: 10000, yawRate: 0 }, { t: 12000, yawRate: yaw(90) }],
+      [...gyro, { t: 10000, yawRate: 0 }, { t: 10150, yawRate: yaw(90) }],
+      mag,
+    );
+    const stalled = fuseHeading(
+      [...gyro, { t: 10000, yawRate: 0 }, { t: 11500, yawRate: yaw(90) }],
       mag,
     );
     const bias = 3 * (1 - Math.exp(-10 / 5));
@@ -588,8 +592,12 @@ describe('fuseHeading', () => {
       return turn === 0 ? 0 : turn;
     };
 
-    expect(at(brake, 12000).heading).toBeCloseTo(at(brake, 10000).heading, 6);
-    expect(at(still, 12000).heading).toBeCloseTo(wrapped(at(still, 10000).heading - bias * 2), 4);
+    expect(at(brake, 10150).heading).toBeCloseTo(at(brake, 10000).heading, 6);
+    expect(at(still, 10150).heading).toBeCloseTo(
+      wrapped(at(still, 10000).heading - bias * 0.15),
+      4,
+    );
+    expect(at(stalled, 11500).heading).toBeCloseTo(at(stalled, 10000).heading, 6);
   });
 });
 

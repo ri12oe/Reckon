@@ -111,7 +111,7 @@ export type HeadingFusionConfig = {
 };
 
 /** A longer gap between samples adds no heading and is not a bias sample. */
-export const MAX_YAW_GAP_MS = 2000;
+export const MAX_YAW_GAP_MS = 150;
 
 export const DEFAULT_HEADING_FUSION_CONFIG: HeadingFusionConfig = {
   tauSeconds: 1.5,

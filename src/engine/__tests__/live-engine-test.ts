@@ -274,8 +274,9 @@ describe('sensor walk', () => {
     const engine = createLiveEngine({ stepLengthM: 1 });
     engine.pushMag({ t: 0, ...northField() });
     engine.pushGyro({ t: 0, yawRate: 0 });
-    engine.pushGyro({ t: 2000, yawRate: 90 * RAD });
-    engine.pushGyro({ t: 3000, yawRate: 0 });
+    for (const t of sampleTimes(2000, 3000, 100)) {
+      engine.pushGyro({ t, yawRate: t === 3000 ? 0 : 90 * RAD });
+    }
     for (const t of [500, 1000, 1500, 2000, 3500, 4000, 4500, 5000]) engine.pushStep({ t });
 
     const snapshot = engine.getSnapshot();
