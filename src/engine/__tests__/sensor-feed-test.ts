@@ -129,8 +129,37 @@ function motionSensors(over: Partial<Record<keyof MotionSensors, FakeSensor>> = 
 const PLANTED = [500, 1000, 1500, 2000];
 
 describe('sensorStartResult', () => {
-  test('any subscription is success, and a total miss prefers permission, then error', () => {
-    expect(sensorStartResult(['subscribed', 'permission'])).toEqual({ ok: true });
+  test('one subscribed sensor is not a start', () => {
+    expect(sensorStartResult(['subscribed', 'permission'])).toEqual({
+      ok: false,
+      reason: 'permission',
+    });
+    expect(sensorStartResult(['unavailable', 'subscribed', 'subscribed'])).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+    expect(sensorStartResult(['subscribed', 'unavailable', 'permission'])).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+    expect(sensorStartResult(['error', 'subscribed', 'permission'])).toEqual({
+      ok: false,
+      reason: 'error',
+    });
+    expect(sensorStartResult(['subscribed', 'stopped', 'stopped'])).toEqual({
+      ok: false,
+      reason: 'cancelled',
+    });
+  });
+
+  test('accelerometer and gyroscope together start, even when the magnetometer does not', () => {
+    expect(sensorStartResult(['subscribed', 'subscribed', 'unavailable'])).toEqual({ ok: true });
+    expect(sensorStartResult(['subscribed', 'subscribed', 'permission'])).toEqual({ ok: true });
+    expect(sensorStartResult(['subscribed', 'subscribed', 'error'])).toEqual({ ok: true });
+    expect(sensorStartResult(['subscribed', 'subscribed', 'stopped'])).toEqual({ ok: true });
+  });
+
+  test('a miss on both required sensors prefers permission, then error', () => {
     expect(sensorStartResult(['permission', 'unavailable', 'error'])).toEqual({
       ok: false,
       reason: 'permission',
@@ -614,7 +643,52 @@ describe('sensor feed into the live engine', () => {
     expect(engine.getSnapshot().sensorStartFailed).toBe('unavailable');
   });
 
-  test('one granted sensor still starts, and a later success clears a previous fault', async () => {
+  test('an accelerometer-only or gyroscope-only start stays idle', async () => {
+    const accelOnly = motionSensors({
+      Accelerometer: fakeSensor(),
+      Gyroscope: fakeSensor({ granted: false }),
+      Magnetometer: fakeSensor({ available: false }),
+    });
+    const engine = createLiveEngine();
+    await expect(engine.startSensors({ sensors: accelOnly })).resolves.toEqual({
+      ok: false,
+      reason: 'permission',
+    });
+    expect(engine.sensorsActive()).toBe(false);
+    expect(engine.getSnapshot()).toMatchObject({
+      sensorStartFailed: 'permission',
+      heading: 0,
+      stepCount: 0,
+      rawPath: [{ x: 0, y: 0, t: 0 }],
+    });
+    expect(engine.getSnapshot().gyroOnly).toBeUndefined();
+
+    for (const sample of deviceVerticalWalk(PLANTED, 3, 160)) accelOnly.Accelerometer.emit(sample);
+    expect(engine.getSnapshot().stepCount).toBe(0);
+    expect(engine.getSnapshot().heading).toBe(0);
+    expect(engine.getSnapshot().rawPath).toEqual([{ x: 0, y: 0, t: 0 }]);
+    expect(engine.getSnapshot().gyroOnly).toBeUndefined();
+
+    const gyroOnly = motionSensors({
+      Accelerometer: fakeSensor({ available: false }),
+      Gyroscope: fakeSensor(),
+      Magnetometer: fakeSensor(),
+    });
+    await expect(engine.startSensors({ sensors: gyroOnly })).resolves.toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+    expect(engine.sensorsActive()).toBe(false);
+    expect(engine.getSnapshot().sensorStartFailed).toBe('unavailable');
+    for (let step = 0; step <= 50; step += 1) {
+      gyroOnly.Gyroscope.emit({ x: 0, y: 0, z: -Math.PI / 2, timestamp: step * 0.02 });
+    }
+    expect(engine.getSnapshot().heading).toBe(0);
+    expect(engine.getSnapshot().gyroOnly).toBeUndefined();
+    expect(engine.getSnapshot().stepCount).toBe(0);
+  });
+
+  test('a missing magnetometer still starts, and a 1 s gyro turn walks east', async () => {
     const denied = motionSensors({
       Accelerometer: fakeSensor({ granted: false }),
       Gyroscope: fakeSensor({ granted: false }),
@@ -622,7 +696,7 @@ describe('sensor feed into the live engine', () => {
     });
     const granted = motionSensors({
       Accelerometer: fakeSensor(),
-      Gyroscope: fakeSensor({ granted: false }),
+      Gyroscope: fakeSensor(),
       Magnetometer: fakeSensor({ available: false }),
     });
     const engine = createLiveEngine();
@@ -633,12 +707,28 @@ describe('sensor feed into the live engine', () => {
     expect(engine.sensorsActive()).toBe(true);
     expect(engine.getSnapshot().sensorStartFailed).toBeUndefined();
     expect(granted.Accelerometer.addListener).toHaveBeenCalledTimes(1);
-    expect(granted.Gyroscope.addListener).not.toHaveBeenCalled();
+    expect(granted.Gyroscope.addListener).toHaveBeenCalledTimes(1);
     expect(granted.Magnetometer.addListener).not.toHaveBeenCalled();
 
-    for (const sample of deviceVerticalWalk(PLANTED, 3, 160)) granted.Accelerometer.emit(sample);
-    expect(engine.getSnapshot().stepCount).toBe(4);
-    expect(engine.getSnapshot().sensorStartFailed).toBeUndefined();
+    for (let step = 0; step <= 50; step += 1) {
+      granted.Gyroscope.emit({ x: 0, y: 0, z: -Math.PI / 2, timestamp: step * 0.02 });
+    }
+    expect(engine.getSnapshot().heading).toBeCloseTo(90, 6);
+    expect(engine.getSnapshot().gyroOnly).toBe(true);
+    expect(engine.getSnapshot().stepCount).toBe(0);
+
+    for (const sample of deviceVerticalWalk([1500, 2000, 2500, 3000], 3, 160)) {
+      granted.Accelerometer.emit(sample);
+    }
+    const walked = engine.getSnapshot();
+    expect(walked.stepCount).toBe(4);
+    expect(walked.heading).toBeCloseTo(90, 6);
+    expect(walked.gyroOnly).toBe(true);
+    expect(walked.rawPath[0]).toEqual({ x: 0, y: 0, t: 0 });
+    expect(walked.rawPath[4]!.x).toBeCloseTo(3, 6);
+    expect(walked.rawPath[4]!.y).toBeCloseTo(0, 6);
+    expect(walked.rawPath[4]!.t).toBe(3000);
+    expect(walked.sensorStartFailed).toBeUndefined();
     engine.stopSensors();
   });
 
