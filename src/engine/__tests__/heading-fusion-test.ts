@@ -404,6 +404,24 @@ describe('fuseHeading', () => {
     expect(at(forward, 2000).heading).toBeCloseTo(45, 6);
   });
 
+  test('90°/s at 50 Hz for 2 s still ends at 180°', () => {
+    const times = clock(0, 2000);
+    const fused = fuseHeading(gyroAt(times, 90), []);
+
+    expect(times).toHaveLength(101);
+    expect(at(fused, 20).heading).toBeCloseTo(1.8, 6);
+    expect(at(fused, 1000).heading).toBeCloseTo(90, 6);
+    expect(at(fused, 2000).heading).toBeCloseTo(180, 6);
+  });
+
+  test('90°/s for 1 s stays at 90° across a later 5 s gap', () => {
+    const times = clock(0, 1000);
+    const fused = fuseHeading([...gyroAt(times, 90), { t: 6000, yawRate: 0 }], []);
+
+    expect(at(fused, 1000).heading).toBeCloseTo(90, 6);
+    expect(at(fused, 6000).heading).toBeCloseTo(90, 6);
+  });
+
   test('a tilt brake holds the heading; a measured 0 rad/s integrates minus the bias', () => {
     const times = clock(0, 10000);
     const gyro = gyroAt(times, 3);
