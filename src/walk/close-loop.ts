@@ -16,8 +16,15 @@ export type LoopRelease = {
   readAgain: boolean;
 };
 
+/** Meters. The corrected end is close enough to the path start to offer closure. */
+const NEAR_START_M = 3;
+
 export function showBackAtStart(shown: EngineSnapshot): boolean {
-  return !isCannedDemo(shown) && shown.stepCount > 0;
+  if (isCannedDemo(shown) || shown.stepCount <= 0) return false;
+  const start = shown.correctedPath[0] ?? { x: 0, y: 0 };
+  const end = shown.correctedPath.at(-1);
+  if (!end) return false;
+  return Math.hypot(end.x - start.x, end.y - start.y) <= NEAR_START_M;
 }
 
 /**
