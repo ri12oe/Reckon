@@ -34,10 +34,6 @@ type CalibrationRow = {
   step_count: number | null;
 };
 
-/**
- * Web's database shim returns null until it opens, so the estimate lives in
- * memory there. A native write that throws leaves that memory unchanged.
- */
 let memoryEstimate: StepLengthEstimate | null = null;
 
 function open(): FlagDb | null {
