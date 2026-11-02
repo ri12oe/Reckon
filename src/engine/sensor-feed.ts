@@ -43,6 +43,7 @@
  */
 
 import type { GyroSample, MagSample } from '@/engine/heading-fusion';
+import type { SensorStartFault } from '@/engine/types';
 import {
   attitudeIsLevel,
   FLAT_SCREEN_UP_DOWN,
@@ -95,8 +96,33 @@ export type SensorFeedSink = {
   pushMag(sample: MagSample): void;
 };
 
+export type SensorAttempt = 'subscribed' | 'permission' | 'unavailable' | 'error' | 'stopped';
+
+export type SensorStartResult =
+  { ok: true } | { ok: false; reason: SensorStartFault | 'cancelled' };
+
+/**
+ * Classify one start. Any subscription is success. With none, a denial
+ * wins over a throw, and a throw wins over a missing sensor. All `stopped`
+ * means the feed was stopped before a sensor could subscribe.
+ */
+export function sensorStartResult(attempts: readonly SensorAttempt[]): SensorStartResult {
+  if (attempts.some((attempt) => attempt === 'subscribed')) return { ok: true };
+  if (attempts.length === 0 || attempts.every((attempt) => attempt === 'stopped')) {
+    return { ok: false, reason: 'cancelled' };
+  }
+  if (attempts.some((attempt) => attempt === 'permission')) {
+    return { ok: false, reason: 'permission' };
+  }
+  if (attempts.some((attempt) => attempt === 'error')) {
+    return { ok: false, reason: 'error' };
+  }
+  return { ok: false, reason: 'unavailable' };
+}
+
 export type SensorFeed = {
   stop(): void;
+  readonly result: SensorStartResult;
 };
 
 export type StartSensorFeedOptions = {
@@ -155,42 +181,44 @@ export async function startSensorFeed(
     if (sessionT === null || t > sessionT) sessionT = t;
   };
 
-  const feed: SensorFeed = {
-    stop() {
-      if (state.stopped) return;
-      state.stopped = true;
-      for (const subscription of state.subscriptions) subscription.remove();
-      state.subscriptions.length = 0;
-      if (sessionT === null) return;
-      sink.pushGyro({ t: sessionT, brake: true });
-    },
+  const stop = () => {
+    if (state.stopped) return;
+    state.stopped = true;
+    for (const subscription of state.subscriptions) subscription.remove();
+    state.subscriptions.length = 0;
+    if (sessionT === null) return;
+    sink.pushGyro({ t: sessionT, brake: true });
   };
 
-  await subscribe(sensors.Accelerometer, intervalMs, state, (measurement) => {
-    const observed = observeAccel(attitude, measurement, readTime);
-    if (!observed) return;
-    if (observed.hold) {
-      noteSession(observed.hold.t);
-      sink.pushGyro(observed.hold);
-    }
-    if (observed.accel) {
-      noteSession(observed.accel.t);
-      sink.pushAccel(observed.accel);
-    }
-  });
-  await subscribe(sensors.Gyroscope, intervalMs, state, (measurement) => {
-    const sample = gyroFromDevice(attitude, measurement, readTime);
-    if (!sample) return;
-    noteSession(sample.t);
-    sink.pushGyro(sample);
-  });
-  await subscribe(sensors.Magnetometer, intervalMs, state, (measurement) => {
-    const sample = magFromDevice(attitude, measurement, readTime);
-    if (!sample) return;
-    noteSession(sample.t);
-    sink.pushMag(sample);
-  });
-
+  const attempts = [
+    await subscribe(sensors.Accelerometer, intervalMs, state, (measurement) => {
+      const observed = observeAccel(attitude, measurement, readTime);
+      if (!observed) return;
+      if (observed.hold) {
+        noteSession(observed.hold.t);
+        sink.pushGyro(observed.hold);
+      }
+      if (observed.accel) {
+        noteSession(observed.accel.t);
+        sink.pushAccel(observed.accel);
+      }
+    }),
+    await subscribe(sensors.Gyroscope, intervalMs, state, (measurement) => {
+      const sample = gyroFromDevice(attitude, measurement, readTime);
+      if (!sample) return;
+      noteSession(sample.t);
+      sink.pushGyro(sample);
+    }),
+    await subscribe(sensors.Magnetometer, intervalMs, state, (measurement) => {
+      const sample = magFromDevice(attitude, measurement, readTime);
+      if (!sample) return;
+      noteSession(sample.t);
+      sink.pushMag(sample);
+    }),
+  ];
+  const result = sensorStartResult(attempts);
+  const feed: SensorFeed = { stop, result };
+  if (!result.ok) feed.stop();
   return feed;
 }
 
@@ -199,30 +227,35 @@ async function subscribe(
   intervalMs: number,
   state: FeedState,
   onSample: (measurement: SensorMeasurement) => void,
-): Promise<void> {
-  if (state.stopped) return;
+): Promise<SensorAttempt> {
+  if (state.stopped) return 'stopped';
   try {
     if (sensor.requestPermissionsAsync) {
       const permission = await sensor.requestPermissionsAsync();
-      if (state.stopped) return;
-      if (permission?.granted === false) return;
+      if (state.stopped) return 'stopped';
+      if (permission?.granted === false) return 'permission';
     }
     if (sensor.isAvailableAsync) {
       const available = await sensor.isAvailableAsync();
-      if (state.stopped) return;
-      if (!available) return;
+      if (state.stopped) return 'stopped';
+      if (!available) return 'unavailable';
     }
   } catch {
-    return;
+    return state.stopped ? 'stopped' : 'error';
   }
-  if (state.stopped) return;
+  if (state.stopped) return 'stopped';
 
-  sensor.setUpdateInterval(intervalMs);
-  const subscription = sensor.addListener((measurement) => {
-    if (state.stopped || measurement == null) return;
-    onSample(measurement);
-  });
-  state.subscriptions.push(subscription);
+  try {
+    sensor.setUpdateInterval(intervalMs);
+    const subscription = sensor.addListener((measurement) => {
+      if (state.stopped || measurement == null) return;
+      onSample(measurement);
+    });
+    state.subscriptions.push(subscription);
+  } catch {
+    return 'error';
+  }
+  return 'subscribed';
 }
 
 function createAttitudeTracker(atRest: AccelAtRest): AttitudeTracker {

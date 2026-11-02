@@ -22,6 +22,13 @@ export type Pin = {
   label: string;
 };
 
+/**
+ * Why the latest `startSensors` subscribed to no motion sensor.
+ * `permission` is a denial. `unavailable` means the sensor reported itself
+ * missing. `error` means the Expo call threw.
+ */
+export type SensorStartFault = 'permission' | 'unavailable' | 'error';
+
 export type EngineSnapshot = {
   rawPath: PathPoint[];
   correctedPath: PathPoint[];
@@ -34,6 +41,7 @@ export type EngineSnapshot = {
    * did not come from fusion.
    */
   gyroOnly?: boolean;
+  sensorStartFailed?: SensorStartFault;
 };
 
 export type FloorwalkerEngine = {

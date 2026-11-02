@@ -6,7 +6,7 @@ import {
   type LiveFloorwalkerEngine,
 } from '@/engine/live-engine';
 import { mockEngine } from '@/engine/mock-engine';
-import type { StartSensorFeedOptions } from '@/engine/sensor-feed';
+import type { SensorStartResult, StartSensorFeedOptions } from '@/engine/sensor-feed';
 
 /**
  * Process-wide live engine. `startSensors` / `stopSensors` subscribe it.
@@ -54,7 +54,7 @@ export function getLiveEngine(): LiveFloorwalkerEngine {
   return getEngine();
 }
 
-export function startSensors(options?: StartSensorFeedOptions): Promise<void> {
+export function startSensors(options?: StartSensorFeedOptions): Promise<SensorStartResult> {
   return getEngine().startSensors(options);
 }
 
@@ -65,7 +65,13 @@ export function stopSensors(): void {
 export { createLiveEngine };
 export type { LandmarkPin, LiveEngineConfig, LiveFloorwalkerEngine };
 
-export type { EngineSnapshot, FloorwalkerEngine, PathPoint, Pin } from '@/engine/types';
+export type {
+  EngineSnapshot,
+  FloorwalkerEngine,
+  PathPoint,
+  Pin,
+  SensorStartFault,
+} from '@/engine/types';
 
 export {
   DEFAULT_STEP_DETECTOR_CONFIG,
@@ -149,14 +155,17 @@ export type { AccelAtRest, Vec3 } from '@/engine/level-attitude';
 export {
   DEFAULT_SENSOR_UPDATE_INTERVAL_MS,
   loadExpoMotionSensors,
+  sensorStartResult,
   startSensorFeed,
 } from '@/engine/sensor-feed';
 export type {
   MotionSensor,
   MotionSensors,
+  SensorAttempt,
   SensorFeed,
   SensorFeedSink,
   SensorMeasurement,
+  SensorStartResult,
   SensorSubscription,
   StartSensorFeedOptions,
 } from '@/engine/sensor-feed';
