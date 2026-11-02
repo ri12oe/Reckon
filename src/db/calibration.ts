@@ -34,10 +34,6 @@ type CalibrationRow = {
   step_count: number | null;
 };
 
-/**
- * Web's database shim returns null until it opens, so the estimate lives in
- * memory there. A failed native write does the same for the rest of this session.
- */
 let memoryEstimate: StepLengthEstimate | null = null;
 
 function open(): FlagDb | null {
@@ -104,15 +100,18 @@ export function saveStepLength(estimate: StepLengthEstimate | null): StepLengthE
     distanceM: checked.distanceM,
     stepCount: checked.stepCount,
   };
-  memoryEstimate = stored;
   const db = open();
-  if (!db) return stored;
+  if (!db) {
+    memoryEstimate = stored;
+    return stored;
+  }
   try {
     ensure(db);
     db.runSync(UPSERT_ROW, stored.stepLengthM, stored.distanceM, stored.stepCount);
   } catch {
-    // Kept in memory above.
+    return null;
   }
+  memoryEstimate = stored;
   return stored;
 }
 

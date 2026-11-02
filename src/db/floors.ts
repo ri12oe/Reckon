@@ -376,13 +376,15 @@ function recordingForSave(snapshot: EngineSnapshot): EngineSnapshot {
 }
 
 function cloneSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
-  return {
+  const copy: EngineSnapshot = {
     rawPath: snapshot.rawPath.map(copyPoint),
     correctedPath: snapshot.correctedPath.map(copyPoint),
     stepCount: Number.isFinite(snapshot.stepCount) ? snapshot.stepCount : 0,
     heading: Number.isFinite(snapshot.heading) ? snapshot.heading : 0,
     pins: snapshot.pins.map(copyPin),
   };
+  if (snapshot.gyroOnly !== undefined) copy.gyroOnly = snapshot.gyroOnly;
+  return copy;
 }
 
 function copyPoint(point: PathPoint): PathPoint {
