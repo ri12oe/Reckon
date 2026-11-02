@@ -20,11 +20,7 @@
  * arrive. A snapshot replays the unsettled tail, not the walk so far.
  * Once a step's heading can no longer change, that heading stays on the
  * step and the raw samples behind it are dropped. The tail is capped, so
- * a long walk does not keep every IMU sample. A heading baked before the
- * first trusted magnetometer fix is still provisional. That fix rotates
- * those steps by the jump from the last gyro sample, once. A step that
- * already carries its own heading is left as given. A later interference
- * hold does not rotate the path again.
+ * a long walk does not keep every IMU sample.
  *
  * `emptySnapshot`, when set, is what `getSnapshot` returns until the first
  * finite accel, gyro, mag, step, or heading sample. `reset()` arms it again.
@@ -208,11 +204,9 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   const stepsAcc = createStepAccumulator(stepDetectorConfig);
   const fusion = createHeadingFusion(headingFusionConfig);
   const fusedHeadings: HeadingSample[] = [];
-  /** Detected steps whose heading is the gyro hold. Parallel to the committed prefix. */
-  const baked: PathStep[] = [];
+  const gyroHeld: PathStep[] = [];
   const explicitSteps: PathStep[] = [];
-  /** Gyro heading baked onto an explicit step that did not bring its own. */
-  let explicitProvisional = new WeakMap<PathStep, number>();
+  let gyroHeadingByStep = new WeakMap<PathStep, number>();
   let acquireBias: AcquireBias | null = null;
   const headingSamples: HeadingSample[] = [];
   let stepLengthM = initialLength;
@@ -241,7 +235,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       return explicitSteps.map((step) => {
         const copy = copyPathStep(step);
         if (copy.heading !== undefined) return copy;
-        const provisional = explicitProvisional.get(step);
+        const provisional = gyroHeadingByStep.get(step);
         if (provisional === undefined) return copy;
         return { t: step.t, heading: courseHeading(provisional, step.t) };
       });
@@ -250,7 +244,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     examined += stepsAcc.takeExamined();
     if (!stepsAcc.prefixStable()) return detected.map((step) => ({ t: step.t }));
     return detected.map((step, index) => {
-      const settled = baked[index];
+      const settled = gyroHeld[index];
       if (
         settled &&
         settled.t === step.t &&
@@ -267,7 +261,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     const replay = fusion.replayPending();
     examined += replay.processed;
     const merged = mergedHeadings(replay.headings);
-    noteAcquire(merged);
+    latchFirstAcquire(merged);
     const latest = replay.headings[replay.headings.length - 1] ?? fusion.latestSettled();
     if (latest) {
       return {
@@ -326,7 +320,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     return snapshot;
   }
 
-  function noteAcquire(samples: readonly HeadingSample[]): void {
+  function latchFirstAcquire(samples: readonly HeadingSample[]): void {
     if (acquireBias) return;
     const bias = firstAcquireBias(samples);
     if (bias) acquireBias = bias;
@@ -372,22 +366,22 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
 
   function alignBaked(collapseBefore: number): void {
     if (!stepsAcc.prefixStable()) {
-      baked.length = 0;
+      gyroHeld.length = 0;
       return;
     }
     const committed = stepsAcc.committed();
     examined += stepsAcc.takeExamined();
-    if (baked.length > committed.length) baked.length = committed.length;
-    for (let index = 0; index < baked.length; index++) {
-      if (baked[index]!.t !== committed[index]!.t) {
-        baked.length = index;
+    if (gyroHeld.length > committed.length) gyroHeld.length = committed.length;
+    for (let index = 0; index < gyroHeld.length; index++) {
+      if (gyroHeld[index]!.t !== committed[index]!.t) {
+        gyroHeld.length = index;
         break;
       }
     }
-    while (baked.length < committed.length) {
-      const step = committed[baked.length]!;
+    while (gyroHeld.length < committed.length) {
+      const step = committed[gyroHeld.length]!;
       if (!(step.t < collapseBefore)) break;
-      baked.push({ t: step.t, heading: holdHeading(fusedHeadings, step.t) });
+      gyroHeld.push({ t: step.t, heading: holdHeading(fusedHeadings, step.t) });
     }
   }
 
@@ -396,8 +390,8 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     for (const step of explicitSteps) {
       if (step.heading !== undefined && Number.isFinite(step.heading)) continue;
       if (!(step.t < collapseBefore)) continue;
-      if (explicitProvisional.has(step)) continue;
-      explicitProvisional.set(step, holdHeading(fusedHeadings, step.t));
+      if (gyroHeadingByStep.has(step)) continue;
+      gyroHeadingByStep.set(step, holdHeading(fusedHeadings, step.t));
     }
   }
 
@@ -412,7 +406,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
 
   function maintainBounds(): void {
     if (!fusionActive()) {
-      if (!stepsAcc.prefixStable()) baked.length = 0;
+      if (!stepsAcc.prefixStable()) gyroHeld.length = 0;
       return;
     }
     const oldestPending = fusion.oldestPendingT();
@@ -420,7 +414,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     let collapseBefore = oldestPending ?? Number.POSITIVE_INFINITY;
     if (horizon !== null && horizon < collapseBefore) collapseBefore = horizon;
 
-    noteAcquire(fusedHeadings);
+    latchFirstAcquire(fusedHeadings);
     alignBaked(collapseBefore);
     bakeExplicit(collapseBefore);
     if (stepsAcc.prefixStable()) collapseHeadings(collapseBefore);
@@ -545,9 +539,9 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       stepsAcc.reset();
       fusion.reset();
       fusedHeadings.length = 0;
-      baked.length = 0;
+      gyroHeld.length = 0;
       explicitSteps.length = 0;
-      explicitProvisional = new WeakMap();
+      gyroHeadingByStep = new WeakMap();
       acquireBias = null;
       headingSamples.length = 0;
       const read = config?.readStepLengthM?.();

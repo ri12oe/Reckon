@@ -17,12 +17,6 @@
  * or before the step (zero-order hold). A sample that is only in the
  * future is not used. Until the first sample, the heading is 0° (north).
  *
- * Samples from heading fusion carry `gyroOnly`. The first sample with
- * `gyroOnly: false` is the trusted fix. Every earlier sample rotates by
- * the jump from the sample before that fix, so the provisional prefix
- * meets the fix. A later `gyroOnly` sample is a hold, not a new fix.
- * Samples that omit the flag are already a course and are used as given.
- *
  * Not in this module: step-length calibration, corridor snap, loop
  * closure, landmarks, or any other drift correction.
  */
@@ -37,10 +31,6 @@ export type HeadingSample = {
   t: number;
   /** Degrees clockwise from north. */
   heading: number;
-  /**
-   * True while the sample is still gyroscope propagation.
-   * The first `false` is the trusted fix that rotates earlier samples.
-   */
   gyroOnly?: boolean;
 };
 
@@ -58,7 +48,7 @@ export function firstAcquireBias(samples: readonly HeadingSample[]): AcquireBias
   let previous: HeadingSample | null = null;
   for (const sample of samples) {
     if (!Number.isFinite(sample.t) || !Number.isFinite(sample.heading)) continue;
-    if (previous?.gyroOnly === true && sample.gyroOnly === false) {
+    if (previous && isFirstTrustedFix(previous, sample)) {
       return { t: sample.t, delta: wrap180(sample.heading - previous.heading) };
     }
     previous = sample;
@@ -66,7 +56,6 @@ export function firstAcquireBias(samples: readonly HeadingSample[]): AcquireBias
   return null;
 }
 
-/** `heading`, rotated when `t` is still in the provisional prefix. */
 export function headingWithAcquireBias(
   heading: number,
   t: number,
@@ -274,6 +263,10 @@ function resolveConfig(config?: Partial<PathIntegrationConfig>): PathIntegration
 
 function finiteOr(value: number | undefined, fallback: number): number {
   return value === undefined || !Number.isFinite(value) ? fallback : value;
+}
+
+function isFirstTrustedFix(previous: HeadingSample, sample: HeadingSample): boolean {
+  return previous.gyroOnly === true && sample.gyroOnly === false;
 }
 
 function wrap360(deg: number): number {
