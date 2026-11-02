@@ -478,6 +478,39 @@ describe('fuseHeading', () => {
     expect(at(fused, 6000).heading).toBeCloseTo(90, 6);
   });
 
+  test('90°/s across a 1.5 s silent gap stays at 0° instead of adding 135°', () => {
+    const fused = fuseHeading(
+      [
+        { t: 0, yawRate: yaw(90) },
+        { t: 1500, yawRate: 0 },
+      ],
+      [],
+    );
+
+    expect(at(fused, 0).heading).toBe(0);
+    expect(at(fused, 1500).heading).toBe(0);
+  });
+
+  test('90°/s across 150 ms adds 13.5° and across 151 ms adds nothing', () => {
+    const held = fuseHeading(
+      [
+        { t: 0, yawRate: yaw(90) },
+        { t: 150, yawRate: 0 },
+      ],
+      [],
+    );
+    const dropped = fuseHeading(
+      [
+        { t: 0, yawRate: yaw(90) },
+        { t: 151, yawRate: 0 },
+      ],
+      [],
+    );
+
+    expect(at(held, 150).heading).toBeCloseTo(13.5, 6);
+    expect(at(dropped, 151).heading).toBe(0);
+  });
+
   test('mag before a trusted level frame stays at 0° with no hold; the same east field acquires 90° at 500 ms', () => {
     const early = clock(0, 480);
     const late = clock(500, 1000);
