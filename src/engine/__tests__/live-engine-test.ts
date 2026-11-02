@@ -833,12 +833,51 @@ describe('drift correction on the live path', () => {
 
     engine.clearRecall();
     expect(engine.isRecalled()).toBe(false);
-    expect(engine.getSnapshot().stepCount).toBe(1);
+    expect(engine.getSnapshot()).toEqual(demo);
 
     engine.recallSnapshot(saved);
     engine.reset();
     expect(engine.isRecalled()).toBe(false);
     expect(engine.getSnapshot()).toEqual(demo);
+  });
+
+  test('samples taken while a floor is recalled do not join the walk clearRecall restores', () => {
+    const engine = createLiveEngine({ stepLengthM: 1 });
+    engine.pushStep({ t: 500, heading: 0 });
+    engine.pushHeading({ t: 500, heading: 0 });
+    const before = engine.getSnapshot();
+    const buffers = engine.bufferStats();
+
+    const saved: EngineSnapshot = {
+      rawPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 4, y: 0, t: 10 },
+      ],
+      correctedPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 4, y: 0, t: 10 },
+      ],
+      stepCount: 2,
+      heading: 90,
+      pins: [],
+    };
+    engine.recallSnapshot(saved);
+    engine.pushAccel({ t: 800, x: 0, y: 0, z: STANDARD_GRAVITY_MPS2 });
+    engine.pushGyro({ t: 800, yawRate: 1 });
+    engine.pushMag({ t: 800, x: 30, y: 10, z: 40 });
+    engine.pushStep({ t: 1000, heading: 180 });
+    engine.pushHeading({ t: 1000, heading: 180 });
+
+    expect(engine.getSnapshot().stepCount).toBe(2);
+    expect(engine.getSnapshot().heading).toBe(90);
+
+    engine.clearRecall();
+    expect(engine.isRecalled()).toBe(false);
+    expect(engine.getSnapshot()).toEqual(before);
+    expect(engine.bufferStats()).toEqual(buffers);
+
+    engine.pushStep({ t: 1500, heading: 0 });
+    expect(engine.getSnapshot().stepCount).toBe(before.stepCount + 1);
   });
 
   test('snapshotForSave is empty during the demo and follows a real walk', () => {

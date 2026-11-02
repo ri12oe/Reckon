@@ -94,7 +94,7 @@ describe('walk pill and a real start', () => {
     engine.pushStep({ t: 500, heading: 90 });
     engine.clearRecall();
     const after = engine.getSnapshot();
-    expect(after.stepCount).toBe(1);
+    expect(after.stepCount).toBe(0);
     expect(after.sensorStartFailed).toBe('permission');
     expect(engine.sensorsActive()).toBe(false);
     expect(walkPill(false, after.sensorStartFailed)).toEqual({
