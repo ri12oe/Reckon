@@ -16,6 +16,7 @@ import { getActiveFloor, resumeLiveWalk, showSavedFloor } from '@/db/session';
 import { shareStoredFloor } from '@/db/share-floor';
 import { getEngine } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
+import { startNewFloor } from '@/library/new-floor';
 import { snapshotForSaveCard } from '@/library/save-card';
 import { pathThumbnail, type Thumbnail } from '@/map/thumbnail';
 import { formatDistance, pathLength } from '@/walk/stats';
@@ -145,7 +146,9 @@ export default function LibraryScreen() {
     ]);
   };
 
-  const startNewFloor = () => {
+  const onNewFloor = () => {
+    setCurrent(startNewFloor());
+    setActiveId(getActiveFloor()?.id ?? null);
     scrollRef.current?.scrollTo({ y: 0, animated: true });
     buildingRef.current?.focus();
   };
@@ -167,8 +170,8 @@ export default function LibraryScreen() {
           <IconButton
             icon="plus"
             label="New floor"
-            accessibilityHint="Name the current walk and save it as a floor"
-            onPress={startNewFloor}
+            accessibilityHint="Clear the live walk and name the new floor"
+            onPress={onNewFloor}
           />
         </>
       }
