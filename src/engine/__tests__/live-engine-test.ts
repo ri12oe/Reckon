@@ -1,7 +1,5 @@
 import { emptyRecording, getEngine, mockEngine } from '@/engine';
-import { fuseHeading, type GyroSample, type MagSample } from '@/engine/heading-fusion';
 import { createLiveEngine } from '@/engine/live-engine';
-import { integratePath } from '@/engine/path-integration';
 import { STANDARD_GRAVITY_MPS2, type AccelSample } from '@/engine/step-detector';
 import type { EngineSnapshot, PathPoint } from '@/engine/types';
 
@@ -206,64 +204,70 @@ describe('sensor walk', () => {
     expect(snapshot.rawPath[5]).toEqual({ x: 0, y: 5, t: 2500 });
   });
 
-  test('a stable 80° compass reacquires and the walk leaves the north line', () => {
+  test('a stable 80° compass stays gyro-only and the walk stays on the north line', () => {
     const planted = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000];
     const times = sampleTimes(0, 4000);
     const engine = createLiveEngine({ stepLengthM: 1 });
+    const northEnd = { x: 0, y: 8, t: 4000 };
 
     for (const sample of verticalWalk(planted)) engine.pushAccel(sample);
     for (const t of times) {
+      if (t > 980) break;
       engine.pushGyro({ t, yawRate: 0 });
-      const axes = t >= 1000 && t <= 3000 ? field(80) : northField();
-      engine.pushMag({ t, ...axes });
+      engine.pushMag({ t, ...northField() });
     }
 
-    const naive = integratePath(
-      planted.map((t) => ({ t })),
-      planted.map((t) => ({ t, heading: t >= 1000 && t <= 3000 ? 80 : 0 })),
-      { stepLength: 1 },
-    );
-    const trusted = fuseHeading(
-      times.map((t): GyroSample => ({ t, yawRate: 0 })),
-      times.map((t): MagSample => ({ t, ...(t >= 1000 && t <= 3000 ? field(80) : northField()) })),
-      { jumpThresholdDeg: 180, reacquireMaxDeg: 180 },
-    );
-    const trustedAt3000 = trusted.find((sample) => sample.t === 3000);
-    const tau = 1.5;
-    const caught = 80 * (1 - Math.exp(-(3000 - 980) / 1000 / tau));
-    const headingAt = (t: number) => {
-      if (t < 1400) return 0;
-      if (t <= 3000) return 80 * (1 - Math.exp(-(t - 980) / 1000 / tau));
-      if (t < 3420) return caught;
-      return caught * Math.exp(-(t - 3000) / 1000 / tau);
-    };
-    const blended = integratePath(
-      planted.map((t) => ({ t, heading: headingAt(t) })),
-      0,
-      { stepLength: 1 },
-    );
+    const before = engine.getSnapshot();
+    expect(before.heading).toBe(0);
+    expect(before.gyroOnly).toBe(false);
+    expect(before.stepCount).toBe(8);
+    expect(before.rawPath[8]).toEqual(northEnd);
 
-    expect(times).toHaveLength(201);
-    expect(naive).toHaveLength(9);
-    expect(naive[8]!.x).toBeCloseTo(4.924038765061, 9);
-    expect(naive[8]!.y).toBeCloseTo(3.868240888335, 9);
-    expect(naive[8]!.t).toBe(4000);
-    expect(trustedAt3000?.heading).toBeCloseTo(59.1915, 3);
-    expect(headingAt(4000)).toBeCloseTo(30.3899, 4);
+    for (const t of times) {
+      if (t < 1000) continue;
+      engine.pushGyro({ t, yawRate: 0 });
+      engine.pushMag({ t, ...field(80) });
+    }
+
+    const after = engine.getSnapshot();
+    expect(after.heading).toBe(0);
+    expect(after.gyroOnly).toBe(true);
+    expect(after.stepCount).toBe(8);
+    expect(after.rawPath[8]).toEqual(northEnd);
+    expect(after.correctedPath[8]).toEqual(northEnd);
+    expect(engine.snapshotForSave()).toEqual(after);
+    expect(engine.snapshotForSave().gyroOnly).toBe(true);
+
+    const recalled = createLiveEngine();
+    recalled.recallSnapshot(engine.snapshotForSave());
+    expect(recalled.getSnapshot().gyroOnly).toBe(true);
+    expect(recalled.getSnapshot().heading).toBe(0);
+    expect(recalled.snapshotForSave().gyroOnly).toBe(true);
+    expect(recalled.snapshotForSave().rawPath[8]).toEqual(northEnd);
+  });
+
+  test('a clean field 20° off the hold reacquires and the walk leaves north', () => {
+    const engine = createLiveEngine({ stepLengthM: 1, drift: { corridor: false } });
+    const times = sampleTimes(0, 4000);
+    for (const t of times) {
+      engine.pushGyro({ t, yawRate: 0 });
+      const axes =
+        t >= 1000 && t < 1400 ? { x: 120, y: 0, z: 160 } : t >= 1400 ? field(20) : northField();
+      engine.pushMag({ t, ...axes });
+    }
+    engine.pushStep({ t: 500 });
+    engine.pushStep({ t: 3000 });
 
     const snapshot = engine.getSnapshot();
-    expect(snapshot.stepCount).toBe(8);
-    expect(snapshot.heading).toBeCloseTo(30.3899, 4);
     expect(snapshot.gyroOnly).toBe(false);
-    expect(snapshot.heading).toBeCloseTo(headingAt(4000), 6);
-    expect(snapshot.rawPath.slice(1).map((point) => point.t)).toEqual(planted);
-    expect(snapshot.rawPath[8]!.x).toBeCloseTo(blended[8]!.x, 4);
-    expect(snapshot.rawPath[8]!.y).toBeCloseTo(blended[8]!.y, 4);
-    expect(snapshot.rawPath[8]!.t).toBe(4000);
-    expect(snapshot.correctedPath[8]!.x).toBeCloseTo(blended[8]!.x, 4);
-    expect(snapshot.correctedPath[8]!.y).toBeCloseTo(blended[8]!.y, 4);
-    expect(snapshot.rawPath[8]).not.toEqual({ x: 0, y: 8, t: 4000 });
-    expect(snapshot.rawPath[8]).not.toEqual(naive[8]);
+    expect(snapshot.heading).toBeCloseTo(17.3291, 4);
+    expect(snapshot.stepCount).toBe(2);
+    expect(snapshot.rawPath[1]).toEqual({ x: 0, y: 1, t: 500 });
+    expect(snapshot.rawPath[2]!.x).toBeCloseTo(0.2554, 4);
+    expect(snapshot.rawPath[2]!.y).toBeCloseTo(1.9668, 4);
+    expect(snapshot.rawPath[2]!.t).toBe(3000);
+    expect(engine.snapshotForSave().gyroOnly).toBe(false);
+    expect(engine.snapshotForSave().heading).toBeCloseTo(17.3291, 4);
   });
 
   test('four steps north, 90°/s for one second, four steps east: (0, 4) then (4, 4), heading 90°', () => {

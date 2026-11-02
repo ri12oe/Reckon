@@ -9,7 +9,10 @@
  * 2. Blend the magnetometer heading with time constant `tauSeconds`.
  *    The magnetometer is absolute and noisy.
  * 3. When the field is interfered, stop the blend and trust the gyro
- *    until a magnetometer window of `recoverHoldMs` is clean and stable.
+ *    until a magnetometer window of `recoverHoldMs` is clean and stable
+ *    and within `reacquireMaxDeg` of the gyro heading. A steady indoor
+ *    field can sit in the magnitude window and still be rotated. That
+ *    does not end the hold.
  *
  * The first in-range magnetometer sample snaps the heading. The recovery
  * hold applies only after that fix has been lost.
@@ -90,8 +93,8 @@ export type HeadingFusionConfig = {
    */
   jumpThresholdDeg: number;
   /**
-   * While the recovery window is not ready, a magnetometer heading farther
-   * than this from the fused heading is not trusted.
+   * A magnetometer heading farther than this from the gyro heading is not
+   * trusted. A stable recovery window outside this angle stays gyro-only.
    */
   reacquireMaxDeg: number;
   /** Milliseconds of clean, stable magnetometer samples required to leave a hold. */
@@ -325,19 +328,19 @@ function applyMagnetometer(
     return { magneticHeading, magnitudeUt };
   }
 
-  if (recoveryReady(state.recentMag, state.baselineUt, config)) {
-    const wasLive = state.phase.kind === 'live';
-    state.phase = { kind: 'live' };
-    if (wasLive) learnBias(state, t, magneticHeading, config);
-    const innovation = wrap180(magneticHeading - state.heading);
-    correct(state, t, magneticHeading, magnitudeUt, innovation, config);
-    return { magneticHeading, magnitudeUt };
-  }
-
   const innovation = wrap180(magneticHeading - state.heading);
   const innovationAbs = Math.abs(innovation);
   const sudden = isJump(state, magneticHeading, config) && innovationAbs > config.jumpThresholdDeg;
   const disagrees = innovationAbs > config.reacquireMaxDeg;
+  const ready = recoveryReady(state.recentMag, state.baselineUt, config);
+
+  if (ready && !disagrees) {
+    const wasLive = state.phase.kind === 'live';
+    state.phase = { kind: 'live' };
+    if (wasLive) learnBias(state, t, magneticHeading, config);
+    correct(state, t, magneticHeading, magnitudeUt, innovation, config);
+    return { magneticHeading, magnitudeUt };
+  }
 
   if (magnitudeBad || sudden || disagrees) {
     if (state.phase.kind === 'live') {

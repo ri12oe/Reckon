@@ -197,7 +197,7 @@ describe('fuseHeading', () => {
     expect(settled.every((sample) => !sample.interference && !sample.gyroOnly)).toBe(true);
   });
 
-  test('a stable 80° compass reacquires after the hold and blends toward 80°', () => {
+  test('a stable field 80° off the pre-hold heading stays gyro-only', () => {
     const times = clock(0, 5000);
     const gyro = gyroAt(times, 0);
     const mag = magAt(times, (t) => (t >= 1000 && t <= 3000 ? field(80) : north()));
@@ -205,32 +205,88 @@ describe('fuseHeading', () => {
     const trusted = fuseHeading(gyro, mag, OPEN_ANGLE_GATES);
 
     expect(times).toHaveLength(251);
-    expect(at(held, 500)).toMatchObject({
+    expect(at(held, 980)).toMatchObject({
       heading: 0,
       magneticHeading: 0,
       interference: false,
       gyroOnly: false,
     });
-    expect(at(held, 1380)).toMatchObject({ heading: 0, interference: true, gyroOnly: true });
-    expect(at(held, 1400).heading).toBeCloseTo(19.5373, 4);
-    expect(at(held, 1400)).toMatchObject({ interference: false, gyroOnly: false });
-    expect(at(held, 2000).heading).toBeCloseTo(39.4706, 4);
-    expect(at(held, 2000).magneticHeading).toBeCloseTo(80, 6);
-    expect(at(held, 2000)).toMatchObject({ interference: false, gyroOnly: false });
-    expect(at(held, 3000).heading).toBeCloseTo(59.1915, 4);
-    expect(at(held, 3000)).toMatchObject({ interference: false, gyroOnly: false });
-    expect(at(held, 3400).heading).toBeCloseTo(59.1915, 4);
-    expect(at(held, 3400)).toMatchObject({ interference: true, gyroOnly: true });
-    expect(at(held, 3420).heading).toBeCloseTo(44.736, 4);
+    expect(at(held, 1380)).toMatchObject({
+      heading: 0,
+      magneticHeading: 80,
+      interference: true,
+      gyroOnly: true,
+    });
+    expect(at(held, 1400)).toMatchObject({
+      heading: 0,
+      magneticHeading: 80,
+      magnitudeUt: 50,
+      interference: true,
+      gyroOnly: true,
+    });
+    expect(at(held, 2000)).toMatchObject({ heading: 0, interference: true, gyroOnly: true });
+    expect(at(held, 3000)).toMatchObject({ heading: 0, interference: true, gyroOnly: true });
+    expect(at(held, 3400)).toMatchObject({ heading: 0, interference: true, gyroOnly: true });
     expect(at(held, 3420)).toMatchObject({
+      heading: 0,
       magneticHeading: 0,
       interference: false,
       gyroOnly: false,
     });
-    expect(at(held, 4000).heading).toBeCloseTo(30.3899, 4);
-    expect(at(held, 4000)).toMatchObject({ interference: false, gyroOnly: false });
+    expect(at(held, 4000)).toMatchObject({
+      heading: 0,
+      interference: false,
+      gyroOnly: false,
+    });
+
+    expect(at(trusted, 1400).heading).toBeCloseTo(19.5373, 4);
+    expect(at(trusted, 1400)).toMatchObject({ interference: false, gyroOnly: false });
+    expect(at(trusted, 2000).heading).toBeCloseTo(39.4706, 4);
     expect(at(trusted, 3000).heading).toBeCloseTo(59.1915, 4);
     expect(at(trusted, 3000).interference).toBe(false);
+  });
+
+  test('a clean field 20° off the pre-hold heading reacquires after the hold', () => {
+    const times = clock(0, 4000);
+    const saturated = { x: 120, y: 0, z: 160 };
+    const fused = fuseHeading(
+      gyroAt(times, 0),
+      magAt(times, (t) => {
+        if (t >= 1000 && t < 1400) return saturated;
+        if (t >= 1400) return field(20);
+        return north();
+      }),
+    );
+
+    expect(at(fused, 980)).toMatchObject({
+      heading: 0,
+      magnitudeUt: 50,
+      interference: false,
+      gyroOnly: false,
+    });
+    expect(at(fused, 1000)).toMatchObject({
+      heading: 0,
+      magnitudeUt: 200,
+      interference: true,
+      gyroOnly: true,
+    });
+    expect(at(fused, 1780)).toMatchObject({
+      heading: 0,
+      magneticHeading: 20,
+      interference: true,
+      gyroOnly: true,
+    });
+    expect(at(fused, 1800).heading).toBeCloseTo(8.4225, 4);
+    expect(at(fused, 1800)).toMatchObject({
+      magneticHeading: 20,
+      magnitudeUt: 50,
+      interference: false,
+      gyroOnly: false,
+    });
+    expect(at(fused, 3000).heading).toBeCloseTo(14.7979, 4);
+    expect(at(fused, 3000)).toMatchObject({ interference: false, gyroOnly: false });
+    expect(at(fused, 4000).heading).toBeCloseTo(17.3291, 4);
+    expect(at(fused, 4000).gyroOnly).toBe(false);
   });
 
   test('40 µT → 60 µT inside the 20–70 window still drops the compass; open deviation follows it to 59.19°', () => {

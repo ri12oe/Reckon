@@ -36,9 +36,10 @@ export type EngineSnapshot = {
   heading: number;
   pins: Pin[];
   /**
-   * Set when `heading` is the latest fused sample.
-   * True while that sample is gyro propagation. Omitted when the heading
-   * did not come from fusion.
+   * Present when `heading` is the latest fused sample.
+   * True while that sample is gyro propagation, including a magnetic hold.
+   * Omitted when the heading did not come from fusion.
+   * `getSnapshot` and `snapshotForSave` keep it on a live or recalled walk.
    */
   gyroOnly?: boolean;
   sensorStartFailed?: SensorStartFault;

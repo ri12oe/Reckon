@@ -27,7 +27,9 @@
  * The shared engine uses that for the static demo walk.
  * `EngineSnapshot.heading` is the course: the latest fused heading, else
  * the latest pushed heading, else the latest step heading, else the
- * configured initial heading (0°).
+ * configured initial heading (0°). `gyroOnly` is set with a fused heading.
+ * `getSnapshot` and `snapshotForSave` both keep it on a live or recalled
+ * walk. The empty recording used for the demo omits it.
  *
  * Corridor snap is off unless `drift.corridor` is `true` or a snap config.
  * Loop closure and landmark tags are off until the caller asks. A landmark
