@@ -16,7 +16,7 @@ import { getEngine, type EngineSnapshot } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
 import type { MapPathMode } from '@/map/geometry';
 import { createMapPoll } from '@/map/live-poll';
-import { formatDistance, pathLength } from '@/walk/stats';
+import { walkReadout, walkSummary } from '@/walk/stats';
 
 /** The map reads the shared snapshot. It does not start the motion sensors. */
 const POLL_MS = 250;
@@ -78,10 +78,7 @@ export default function MapScreen() {
     </Glass>
   );
 
-  const pins = snapshot.pins.length;
-  const summary = `${snapshot.stepCount} steps · ${formatDistance(
-    pathLength(snapshot.correctedPath),
-  )} · ${pins} ${pins === 1 ? 'pin' : 'pins'}`;
+  const summary = walkSummary(walkReadout(snapshot));
 
   return (
     <Screen

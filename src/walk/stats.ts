@@ -1,4 +1,4 @@
-import type { PathPoint } from '@/engine/types';
+import type { EngineSnapshot, PathPoint } from '@/engine/types';
 
 const DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
 
@@ -35,4 +35,24 @@ export function formatHeading(heading: number): string {
 
 export function headingIsGyroOnly(gyroOnly: boolean | undefined): boolean {
   return gyroOnly === true;
+}
+
+export type WalkReadout = {
+  stepCount: number;
+  distance: string;
+  pinCount: number;
+};
+
+/** Step, distance, and pin counts the Walk and Map readouts show. */
+export function walkReadout(snapshot: EngineSnapshot): WalkReadout {
+  return {
+    stepCount: snapshot.stepCount,
+    distance: formatDistance(pathLength(snapshot.correctedPath)),
+    pinCount: snapshot.pins.length,
+  };
+}
+
+export function walkSummary(readout: WalkReadout): string {
+  const noun = readout.pinCount === 1 ? 'pin' : 'pins';
+  return `${readout.stepCount} steps · ${readout.distance} · ${readout.pinCount} ${noun}`;
 }
