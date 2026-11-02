@@ -214,6 +214,37 @@ describe('floor stores', () => {
   behavesLikeFloorStore('memory', () => createMemoryFloorStore({ now: clock() }));
   behavesLikeFloorStore('sqlite', openSqlite);
 
+  test('a memory floor recalls gyroOnly true, false, and omitted', () => {
+    const store = createMemoryFloorStore({ now: clock() });
+    const gyro = store.save({
+      buildingName: 'North Hall',
+      floorName: 'Gyro',
+      snapshot: { ...sample(), gyroOnly: true },
+    });
+    const trusted = store.save({
+      buildingName: 'North Hall',
+      floorName: 'Trusted',
+      snapshot: { ...sample(), gyroOnly: false },
+    });
+    const plain = store.save({
+      buildingName: 'North Hall',
+      floorName: 'Plain',
+      snapshot: sample(),
+    });
+
+    expect(store.get(gyro.id)?.snapshot.gyroOnly).toBe(true);
+    expect(store.get(trusted.id)?.snapshot.gyroOnly).toBe(false);
+    expect(store.get(plain.id)?.snapshot.gyroOnly).toBeUndefined();
+
+    const gyroFloor = store.get(gyro.id);
+    const trustedFloor = store.get(trusted.id);
+    const plainFloor = store.get(plain.id);
+    if (!gyroFloor || !trustedFloor || !plainFloor) throw new Error('saved floor missing');
+    expect(floorExportDocument(gyroFloor).snapshot.gyroOnly).toBe(true);
+    expect(floorExportDocument(trustedFloor).snapshot.gyroOnly).toBe(false);
+    expect(floorExportDocument(plainFloor).snapshot.gyroOnly).toBeUndefined();
+  });
+
   test('sqlite creates the floor tables', () => {
     const { DatabaseSync } = loadSqlite();
     const raw = new DatabaseSync(':memory:');

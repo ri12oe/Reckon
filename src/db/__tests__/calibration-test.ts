@@ -125,6 +125,34 @@ describe('calibration store', () => {
     expect(readStepLength()).toEqual(eightOverFive);
   });
 
+  test('a failed row write does not report the estimate as saved', () => {
+    state.db = {
+      execSync() {},
+      runSync() {
+        throw new Error('disk full');
+      },
+      getFirstSync() {
+        throw new Error('disk full');
+      },
+    };
+    const { isCalibrated, readStepLength, saveStepLength } = loadStore();
+    expect(saveStepLength(eightOverFive)).toBeNull();
+    expect(readStepLength()).toBeNull();
+    expect(isCalibrated()).toBe(false);
+  });
+
+  test('a failed overwrite leaves the length already stored', () => {
+    state.db = memoryDb();
+    const { isCalibrated, readStepLength, saveStepLength } = loadStore();
+    expect(saveStepLength(eightOverFive)).toEqual(eightOverFive);
+    state.db.runSync = () => {
+      throw new Error('disk full');
+    };
+    expect(saveStepLength({ stepLengthM: 0.7, distanceM: 7, stepCount: 10 })).toBeNull();
+    expect(readStepLength()).toEqual(eightOverFive);
+    expect(isCalibrated()).toBe(true);
+  });
+
   test('without a database the estimate is remembered in this session', () => {
     state.db = null;
     const { calibrationDatabaseOpen, isCalibrated, readStepLength, saveStepLength } = loadStore();
