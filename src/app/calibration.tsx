@@ -24,6 +24,7 @@ import { isCalibrated, readStepLength } from '@/db/calibration';
 import { ensureDatabase } from '@/db/database';
 import { createLiveEngine, getEngine, type LiveFloorwalkerEngine } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
+import { sensorStartFaultMessage } from '@/sensor-start';
 
 /** Re-read the engine often enough to catch a step as it lands. */
 const POLL_MS = 50;
@@ -71,6 +72,7 @@ export default function CalibrationScreen() {
       let calibration: LiveFloorwalkerEngine | null = null;
       let timer: ReturnType<typeof setInterval> | undefined;
       let walking = false;
+      let disposed = false;
 
       const halt = () => {
         const started = walking;
@@ -100,7 +102,16 @@ export default function CalibrationScreen() {
         walking = true;
         sessionRef.current = next;
         setSession(next);
-        void engine.startSensors().catch(() => undefined);
+        void engine.startSensors().then((started) => {
+          if (disposed || !walking) return;
+          const message = sensorStartFaultMessage(started);
+          if (message === null) return;
+          const idle = cancelCalibration(sessionRef.current);
+          sessionRef.current = idle;
+          halt();
+          setSession(idle);
+          setStatus(message);
+        });
 
         const tick = () => {
           if (!walking) return;
@@ -144,6 +155,7 @@ export default function CalibrationScreen() {
       };
 
       return () => {
+        disposed = true;
         const next = leaveCalibration(sessionRef.current);
         sessionRef.current = next;
         halt();

@@ -1,4 +1,10 @@
-import { compassPoint, formatDistance, formatHeading, pathLength } from '@/walk/stats';
+import {
+  compassPoint,
+  formatDistance,
+  formatHeading,
+  headingIsGyroOnly,
+  pathLength,
+} from '@/walk/stats';
 
 const at = (x: number, y: number) => ({ x, y, t: 0 });
 
@@ -41,5 +47,11 @@ describe('compass headings', () => {
     expect(formatHeading(-90)).toBe('270° W');
     expect(formatHeading(359.7)).toBe('0° N');
     expect(formatHeading(NaN)).toBe('0° N');
+  });
+
+  test('only fused gyro propagation dims the heading', () => {
+    expect(headingIsGyroOnly(true)).toBe(true);
+    expect(headingIsGyroOnly(false)).toBe(false);
+    expect(headingIsGyroOnly(undefined)).toBe(false);
   });
 });

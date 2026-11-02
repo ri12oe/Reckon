@@ -10,11 +10,18 @@ import SkiaWalk from '@/components/skia-walk';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { getActiveFloor, resumeLiveWalk, type ActiveFloor } from '@/db/session';
-import { getEngine, mockEngine, type EngineSnapshot, type LiveFloorwalkerEngine } from '@/engine';
+import {
+  getEngine,
+  mockEngine,
+  type EngineSnapshot,
+  type LiveFloorwalkerEngine,
+  type SensorStartFault,
+} from '@/engine';
 import { lightHaptic } from '@/haptics';
 import { useTheme } from '@/hooks/use-theme';
+import { walkPill } from '@/sensor-start';
 import { dropWalkPin, readWalk, type HeldPin, type WalkPinRead } from '@/walk/pin-drop';
-import { formatDistance, formatHeading, pathLength } from '@/walk/stats';
+import { formatDistance, formatHeading, headingIsGyroOnly, pathLength } from '@/walk/stats';
 
 /** Re-read the engine often enough to track a step as it lands. */
 const POLL_MS = 50;
@@ -37,7 +44,7 @@ export default function WalkScreen() {
   useFocusEffect(
     useCallback(() => {
       const engine = getEngine();
-      void engine.startSensors().catch(() => undefined);
+      let stopped = false;
 
       const read = () => {
         const next = engine.getSnapshot();
@@ -52,7 +59,13 @@ export default function WalkScreen() {
 
       read();
       const timer = setInterval(read, POLL_MS);
+      void engine.startSensors().then((started) => {
+        if (stopped) return;
+        if (!started.ok && started.reason === 'cancelled') return;
+        read();
+      });
       return () => {
+        stopped = true;
         clearInterval(timer);
         engine.stopSensors();
       };
@@ -91,7 +104,7 @@ export default function WalkScreen() {
     <Screen
       title="Walk"
       subtitle={active ? `${active.buildingName} · ${active.name}` : 'Live walk'}
-      headerRight={<StatusPill live={!active} />}
+      headerRight={<StatusPill savedFloor={active !== null} fault={snapshot.sensorStartFailed} />}
       background={<GridBackground />}
     >
       <Glass style={styles.readout}>
@@ -99,7 +112,11 @@ export default function WalkScreen() {
         <View style={[styles.divider, { backgroundColor: theme.glassBorder }]} />
         <Metric label="Distance" value={formatDistance(pathLength(snapshot.correctedPath))} />
         <View style={[styles.divider, { backgroundColor: theme.glassBorder }]} />
-        <Metric label="Heading" value={formatHeading(heading)} />
+        <Metric
+          label="Heading"
+          value={formatHeading(heading)}
+          dim={headingIsGyroOnly(snapshot.gyroOnly)}
+        />
       </Glass>
       <Glass style={styles.legend}>
         <LegendItem label="Raw">
@@ -145,18 +162,37 @@ export default function WalkScreen() {
   );
 }
 
-function StatusPill({ live }: { live: boolean }) {
+function StatusPill({
+  savedFloor,
+  fault,
+}: {
+  savedFloor: boolean;
+  fault: SensorStartFault | undefined;
+}) {
   const theme = useTheme();
+  const pill = walkPill(savedFloor, fault);
   return (
     <Glass style={styles.pill}>
-      <View style={[styles.dot, { backgroundColor: live ? theme.success : theme.textSecondary }]} />
-      <ThemedText type="smallBold">{live ? 'Live' : 'Saved floor'}</ThemedText>
+      <View
+        style={[styles.dot, { backgroundColor: pill.live ? theme.success : theme.textSecondary }]}
+      />
+      <ThemedText type="smallBold">{pill.label}</ThemedText>
     </Glass>
   );
 }
 
 /** "45.8 m" shows as a large 45.8 with a small m; "60° NE" as 60° with NE. */
-function Metric({ label, value, live }: { label: string; value: string; live?: boolean }) {
+function Metric({
+  label,
+  value,
+  live,
+  dim,
+}: {
+  label: string;
+  value: string;
+  live?: boolean;
+  dim?: boolean;
+}) {
   const split = value.lastIndexOf(' ');
   const number = split > 0 ? value.slice(0, split) : value;
   const unit = split > 0 ? value.slice(split + 1) : '';
@@ -167,6 +203,7 @@ function Metric({ label, value, live }: { label: string; value: string; live?: b
       </ThemedText>
       <ThemedText
         type="metric"
+        themeColor={dim ? 'textSecondary' : 'text'}
         numberOfLines={1}
         accessibilityLiveRegion={live ? 'polite' : undefined}
       >
