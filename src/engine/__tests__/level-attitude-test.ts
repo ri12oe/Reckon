@@ -1,6 +1,13 @@
-import { createLiveEngine, magneticHeadingDeg, type LiveFloorwalkerEngine } from '@/engine';
+import {
+  createLiveEngine,
+  fuseHeading,
+  magneticHeadingDeg,
+  type FusedHeading,
+  type LiveFloorwalkerEngine,
+} from '@/engine';
 import {
   attitudeIsLevel,
+  FLAT_SCREEN_UP_DOWN,
   LEVEL_MAX_TILT_FROM_HORIZONTAL_DEG,
   levelMagnetometer,
   tiltFromHorizontalDeg,
@@ -494,6 +501,98 @@ describe('tilt gate', () => {
         turnedHeading: round4(turned.heading),
       }),
     );
+    engine.stopSensors();
+  });
+});
+
+function fusedAt(samples: readonly FusedHeading[], t: number): FusedHeading {
+  const found = samples.find((sample) => sample.t === t);
+  if (!found) throw new Error(`no fused sample at ${t} ms`);
+  return found;
+}
+
+describe('mag before trusted down', () => {
+  test('65° east mag before gravity stays at 0° and does not latch 140.39°; after down it tracks east at 90°', async () => {
+    const pitch = 65 * DEG;
+    const heading = 90 * DEG;
+    const down = downDevice(pitch);
+    const device = deviceMag(pitch, heading);
+    const flat = levelMagnetometer(device, FLAT_SCREEN_UP_DOWN);
+    const trusted = levelMagnetometer(device, down);
+    expect(flat).not.toBeNull();
+    expect(trusted).not.toBeNull();
+    expect(magneticHeadingDeg(flat!.x, flat!.y)).toBeCloseTo(140.3911, 4);
+    expect(magneticHeadingDeg(trusted!.x, trusted!.y)).toBeCloseTo(90, 8);
+
+    const fused = fuseHeading(
+      [0, 400, 420].map((t) => ({ t, yawRate: 0 })),
+      [
+        { t: 0, ...flat!, levelReady: false },
+        { t: 400, ...flat!, levelReady: false },
+        { t: 420, ...trusted! },
+      ],
+    );
+    expect(fusedAt(fused, 0)).toMatchObject({
+      heading: 0,
+      magneticHeading: expect.closeTo(140.3911, 4),
+      magnitudeUt: expect.closeTo(50, 8),
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(fusedAt(fused, 400)).toMatchObject({
+      heading: 0,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(fusedAt(fused, 420)).toMatchObject({
+      heading: 90,
+      magneticHeading: 90,
+      magnitudeUt: expect.closeTo(50, 8),
+      gyroOnly: false,
+      interference: false,
+    });
+
+    const sensors = motionSensors();
+    const engine = engineForSquare();
+    await engine.startSensors({ sensors, accelAtRest: 'down' });
+    const emitMag = (t: number) => {
+      sensors.Magnetometer.emit({ ...device, timestamp: t / 1000 });
+    };
+    for (let t = 0; t <= 400; t += DT_MS) emitMag(t);
+    const before = engine.getSnapshot();
+    expect(before.heading).toBeCloseTo(0, 5);
+    expect(before.gyroOnly).toBe(true);
+    expect(angularError(before.heading, 140.3911)).toBeGreaterThan(90);
+
+    const emitPose = (t: number, bump: number) => {
+      const scale = 1 + bump / G;
+      sensors.Accelerometer.emit({
+        x: down.x * scale,
+        y: down.y * scale,
+        z: down.z * scale,
+        timestamp: t / 1000,
+      });
+      sensors.Gyroscope.emit({ x: 0, y: 0, z: 0, timestamp: t / 1000 });
+      emitMag(t);
+    };
+    emitPose(420, 0);
+    const acquired = engine.getSnapshot();
+    expect(acquired.heading).toBeCloseTo(90, 5);
+    expect(acquired.gyroOnly).toBe(false);
+
+    const stepCenters = [1000, 1500, 2000];
+    for (let t = 440; t <= 2200; t += DT_MS) {
+      let bump = 0;
+      for (const center of stepCenters) bump += hann(t, center, STEP_AMP, STEP_HALF_MS);
+      emitPose(t, bump);
+    }
+    const walked = engine.getSnapshot();
+    const end = walked.rawPath[walked.rawPath.length - 1]!;
+    expect(walked.stepCount).toBe(3);
+    expect(walked.heading).toBeCloseTo(90, 5);
+    expect(walked.gyroOnly).toBe(false);
+    expect(end.x).toBeCloseTo(3, 4);
+    expect(end.y).toBeCloseTo(0, 4);
     engine.stopSensors();
   });
 });

@@ -339,7 +339,13 @@ function magFromDevice(
   if (t === null) return null;
   const leveled = levelMagnetometer(measurement, tracker.down ?? FLAT_SCREEN_UP_DOWN);
   if (!leveled) return null;
-  return { t, x: leveled.x, y: leveled.y, z: leveled.z };
+  return {
+    t,
+    x: leveled.x,
+    y: leveled.y,
+    z: leveled.z,
+    ...(tracker.down === null ? { levelReady: false } : {}),
+  };
 }
 
 function resolveAccelAtRest(value: AccelAtRest | undefined): AccelAtRest {

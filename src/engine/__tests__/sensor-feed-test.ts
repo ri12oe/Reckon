@@ -176,7 +176,7 @@ describe('sensor frame conversion', () => {
       },
     ]);
     expect(gyro).toEqual([{ t: 2250, yawRate: 1.25 }]);
-    expect(mag).toEqual([{ t: 400, x: 12, y: -30, z: 40 }]);
+    expect(mag).toEqual([{ t: 400, x: 12, y: -30, z: 40, levelReady: false }]);
     feed.stop();
   });
 
