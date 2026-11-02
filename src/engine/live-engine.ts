@@ -62,6 +62,7 @@ import {
 import {
   startSensorFeed,
   type SensorFeed,
+  type SensorStartResult,
   type StartSensorFeedOptions,
 } from '@/engine/sensor-feed';
 import {
@@ -74,7 +75,13 @@ import {
   estimateStepLength,
   type StepLengthEstimate,
 } from '@/engine/step-length';
-import type { EngineSnapshot, FloorwalkerEngine, PathPoint, Pin } from '@/engine/types';
+import type {
+  EngineSnapshot,
+  FloorwalkerEngine,
+  PathPoint,
+  Pin,
+  SensorStartFault,
+} from '@/engine/types';
 
 export type LiveEngineConfig = {
   stepDetector?: Partial<StepDetectorConfig>;
@@ -147,7 +154,7 @@ export type LiveFloorwalkerEngine = FloorwalkerEngine & {
   reset(): void;
   getStepLength(): number;
   sensorsActive(): boolean;
-  startSensors(options?: StartSensorFeedOptions): Promise<void>;
+  startSensors(options?: StartSensorFeedOptions): Promise<SensorStartResult>;
   stopSensors(): void;
   /** Retained IMU, and how many samples the last snapshot walked. */
   bufferStats(): IngestStats;
@@ -191,7 +198,8 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   let recalled: EngineSnapshot | null = null;
   let accepted = false;
   let feed: SensorFeed | null = null;
-  let starting: Promise<void> | null = null;
+  let starting: Promise<SensorStartResult> | null = null;
+  let sensorFault: SensorStartFault | null = null;
   let generation = 0;
   let examined = 0;
   let lastExamined = 0;
@@ -450,6 +458,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       drift = cloneDrift(initialDrift);
       accepted = false;
       recalled = null;
+      sensorFault = null;
       examined = 0;
       lastExamined = 0;
       touch();
@@ -458,19 +467,21 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       return stepLengthM;
     },
     getSnapshot() {
-      if (recalled) return cloneSnapshot(recalled);
-      if (!accepted && emptySnapshot) return cloneSnapshot(emptySnapshot);
+      if (recalled) return present(recalled, sensorFault);
+      if (!accepted && emptySnapshot) return present(emptySnapshot, sensorFault);
       if (!cached) {
         cached = compute();
         lastExamined = examined;
         examined = 0;
       }
-      return cloneSnapshot(cached);
+      return present(cached, sensorFault);
     },
     snapshotForSave() {
       const shown = engine.getSnapshot();
       if ((!accepted && !recalled) || isCannedDemo(shown)) return emptyRecording();
-      return shown;
+      const saved = cloneSnapshot(shown);
+      delete saved.sensorStartFailed;
+      return saved;
     },
     sensorsActive() {
       return feed !== null || starting !== null;
@@ -484,7 +495,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       };
     },
     startSensors(sensorOptions) {
-      if (feed) return Promise.resolve();
+      if (feed) return Promise.resolve({ ok: true });
       if (starting) return starting;
 
       const token = generation;
@@ -504,13 +515,27 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
           },
         },
         sensorOptions,
-      ).then((next) => {
-        if (token !== generation) {
-          next.stop();
-          return;
-        }
-        feed = next;
-      });
+      ).then(
+        (next) => {
+          if (token !== generation) {
+            next.stop();
+            return { ok: false, reason: 'cancelled' } as const;
+          }
+          if (!next.result.ok) {
+            next.stop();
+            if (next.result.reason !== 'cancelled') sensorFault = next.result.reason;
+            return next.result;
+          }
+          sensorFault = null;
+          feed = next;
+          return next.result;
+        },
+        () => {
+          if (token !== generation) return { ok: false, reason: 'cancelled' } as const;
+          sensorFault = 'error';
+          return { ok: false, reason: 'error' } as const;
+        },
+      );
 
       starting = pending;
       return pending.finally(() => {
@@ -521,6 +546,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       const current = feed;
       feed = null;
       starting = null;
+      sensorFault = null;
       current?.stop();
       generation += 1;
     },
@@ -707,6 +733,13 @@ function copyLoopTarget(
   return { x: target.x, y: target.y };
 }
 
+function present(snapshot: EngineSnapshot, fault: SensorStartFault | null): EngineSnapshot {
+  const copy = cloneSnapshot(snapshot);
+  if (fault) copy.sensorStartFailed = fault;
+  else delete copy.sensorStartFailed;
+  return copy;
+}
+
 function cloneSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
   const copy: EngineSnapshot = {
     rawPath: snapshot.rawPath.map(copyPoint),
@@ -716,6 +749,7 @@ function cloneSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
     pins: snapshot.pins.map((pin) => ({ id: pin.id, x: pin.x, y: pin.y, label: pin.label })),
   };
   if (snapshot.gyroOnly !== undefined) copy.gyroOnly = snapshot.gyroOnly;
+  if (snapshot.sensorStartFailed !== undefined) copy.sensorStartFailed = snapshot.sensorStartFailed;
   return copy;
 }
 
