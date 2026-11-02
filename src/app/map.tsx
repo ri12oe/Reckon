@@ -15,6 +15,7 @@ import { liveWalkFloor, shareStoredFloor } from '@/db/share-floor';
 import { getEngine, type EngineSnapshot } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
 import type { MapPathMode } from '@/map/geometry';
+import { createMapPoll } from '@/map/live-poll';
 import { formatDistance, pathLength } from '@/walk/stats';
 
 /** The map reads the shared snapshot. It does not start the motion sensors. */
@@ -31,9 +32,9 @@ export default function MapScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      const engine = getEngine();
+      const poll = createMapPoll();
       const read = () => {
-        setSnapshot(engine.getSnapshot());
+        setSnapshot(poll());
         setActive(getActiveFloor());
       };
       read();
