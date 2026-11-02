@@ -23,9 +23,9 @@ export type Pin = {
 };
 
 /**
- * Why the latest `startSensors` subscribed to no motion sensor.
- * `permission` is a denial. `unavailable` means the sensor reported itself
- * missing. `error` means the Expo call threw.
+ * Why the latest `startSensors` did not subscribe to both the accelerometer
+ * and the gyroscope. `permission` is a denial. `unavailable` means a required
+ * sensor reported itself missing. `error` means the Expo call threw.
  */
 export type SensorStartFault = 'permission' | 'unavailable' | 'error';
 

@@ -162,6 +162,7 @@ export type {
   MotionSensor,
   MotionSensors,
   SensorAttempt,
+  SensorStartAttempts,
   SensorFeed,
   SensorFeedSink,
   SensorMeasurement,
