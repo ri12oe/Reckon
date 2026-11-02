@@ -1,4 +1,4 @@
-import type { EngineSnapshot, LiveFloorwalkerEngine } from '@/engine';
+import { isCannedDemo, type EngineSnapshot, type LiveFloorwalkerEngine } from '@/engine';
 
 type LoopEngine = Pick<LiveFloorwalkerEngine, 'setDrift' | 'isRecalled'>;
 
@@ -15,6 +15,10 @@ export type LoopRelease = {
    */
   readAgain: boolean;
 };
+
+export function showBackAtStart(shown: EngineSnapshot): boolean {
+  return !isCannedDemo(shown) && shown.stepCount > 0;
+}
 
 /**
  * The walker says this end is the start. Later snapshots spread the gap

@@ -20,7 +20,12 @@ import {
 import { lightHaptic } from '@/haptics';
 import { useTheme } from '@/hooks/use-theme';
 import { walkPill } from '@/sensor-start';
-import { assertBackAtStart, releaseBackAtStart, type LoopHold } from '@/walk/close-loop';
+import {
+  assertBackAtStart,
+  releaseBackAtStart,
+  showBackAtStart,
+  type LoopHold,
+} from '@/walk/close-loop';
 import { createWalkPoll } from '@/walk/live-poll';
 import {
   commitWalkPins,
@@ -157,7 +162,7 @@ export default function WalkScreen() {
         </LegendItem>
       </Glass>
       <SkiaWalk snapshot={snapshot} follow={follow} />
-      {active ? null : (
+      {active || !showBackAtStart(snapshot) ? null : (
         <Button
           label="Back at start"
           variant="glass"
