@@ -10,6 +10,7 @@ import {
   startSensors,
   stopSensors,
   startSensorFeed,
+  type EngineSnapshot,
   type GyroSample,
   type MotionSensor,
   type MotionSensors,
@@ -87,10 +88,12 @@ function fakeSensor(options?: {
   available?: boolean;
   granted?: boolean;
   failAvailable?: boolean;
+  failListen?: boolean;
 }): FakeSensor {
   let listener: ((measurement: SensorMeasurement) => void) | null = null;
   return {
     addListener: jest.fn((fn: (measurement: SensorMeasurement) => void) => {
+      if (options?.failListen) throw new Error('expo start failed');
       listener = fn;
       return {
         remove: jest.fn(() => {
@@ -443,14 +446,19 @@ describe('sensor feed into the live engine', () => {
     engine.stopSensors();
   });
 
-  test('denied, unavailable, and throwing sensors are skipped', async () => {
+  test('a start with no subscribed sensor reports permission and stays idle', async () => {
     const sensors = motionSensors({
       Accelerometer: fakeSensor({ granted: false }),
       Gyroscope: fakeSensor({ available: false }),
       Magnetometer: fakeSensor({ failAvailable: true }),
     });
     const engine = createLiveEngine();
-    await expect(engine.startSensors({ sensors })).resolves.toBeUndefined();
+    await expect(engine.startSensors({ sensors })).resolves.toEqual({
+      ok: false,
+      reason: 'permission',
+    });
+    expect(engine.sensorsActive()).toBe(false);
+    expect(engine.getSnapshot().sensorStartFailed).toBe('permission');
 
     expect(sensors.Accelerometer.addListener).not.toHaveBeenCalled();
     expect(sensors.Gyroscope.addListener).not.toHaveBeenCalled();
@@ -459,6 +467,129 @@ describe('sensor feed into the live engine', () => {
 
     for (const sample of deviceVerticalWalk(PLANTED, 3, 160)) sensors.Accelerometer.emit(sample);
     expect(engine.getSnapshot().stepCount).toBe(0);
+    expect(engine.getSnapshot().sensorStartFailed).toBe('permission');
+    engine.stopSensors();
+    expect(engine.getSnapshot().sensorStartFailed).toBeUndefined();
+  });
+
+  test('a failed start is not a live walk while a recalled snapshot is showing', async () => {
+    const saved: EngineSnapshot = {
+      rawPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 3, y: 0, t: 800 },
+      ],
+      correctedPath: [
+        { x: 0, y: 0, t: 0 },
+        { x: 3, y: 0, t: 800 },
+      ],
+      stepCount: 4,
+      heading: 12,
+      pins: [],
+    };
+    const sensors = motionSensors({
+      Accelerometer: fakeSensor({ granted: false }),
+      Gyroscope: fakeSensor({ granted: false }),
+      Magnetometer: fakeSensor({ granted: false }),
+    });
+    const engine = createLiveEngine();
+    engine.recallSnapshot(saved);
+
+    const started = await engine.startSensors({ sensors });
+    engine.pushStep({ t: 500, heading: 90 });
+    const during = engine.getSnapshot();
+    const duringActive = engine.sensorsActive();
+    engine.clearRecall();
+    const after = engine.getSnapshot();
+
+    expect({
+      started,
+      duringActive,
+      duringStepCount: during.stepCount,
+      duringHeading: during.heading,
+      duringFault: during.sensorStartFailed ?? null,
+      afterStepCount: after.stepCount,
+      afterHeading: after.heading,
+      afterFault: after.sensorStartFailed ?? null,
+      afterActive: engine.sensorsActive(),
+    }).toEqual({
+      started: { ok: false, reason: 'permission' },
+      duringActive: false,
+      duringStepCount: 4,
+      duringHeading: 12,
+      duringFault: 'permission',
+      afterStepCount: 1,
+      afterHeading: 90,
+      afterFault: 'permission',
+      afterActive: false,
+    });
+    expect(engine.snapshotForSave().sensorStartFailed).toBeUndefined();
+    expect(engine.snapshotForSave().stepCount).toBe(1);
+  });
+
+  test('an Expo listen failure resolves as an error instead of a live session', async () => {
+    const sensors = motionSensors({
+      Accelerometer: fakeSensor({ failListen: true }),
+      Gyroscope: fakeSensor({ failListen: true }),
+      Magnetometer: fakeSensor({ failListen: true }),
+    });
+    const engine = createLiveEngine();
+    const started = await engine.startSensors({ sensors }).then(
+      (value) => value,
+      (error: unknown) => error,
+    );
+    expect({
+      rejected: started instanceof Error,
+      started: started instanceof Error ? started.message : started,
+      fault: engine.getSnapshot().sensorStartFailed ?? null,
+      active: engine.sensorsActive(),
+    }).toEqual({
+      rejected: false,
+      started: { ok: false, reason: 'error' },
+      fault: 'error',
+      active: false,
+    });
+  });
+
+  test('a start where every sensor is unavailable reports unavailable', async () => {
+    const sensors = motionSensors({
+      Accelerometer: fakeSensor({ available: false }),
+      Gyroscope: fakeSensor({ available: false }),
+      Magnetometer: fakeSensor({ available: false }),
+    });
+    const engine = createLiveEngine();
+    await expect(engine.startSensors({ sensors })).resolves.toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+    expect(engine.sensorsActive()).toBe(false);
+    expect(engine.getSnapshot().sensorStartFailed).toBe('unavailable');
+  });
+
+  test('one granted sensor still starts, and a later success clears a previous fault', async () => {
+    const denied = motionSensors({
+      Accelerometer: fakeSensor({ granted: false }),
+      Gyroscope: fakeSensor({ granted: false }),
+      Magnetometer: fakeSensor({ granted: false }),
+    });
+    const granted = motionSensors({
+      Accelerometer: fakeSensor(),
+      Gyroscope: fakeSensor({ granted: false }),
+      Magnetometer: fakeSensor({ available: false }),
+    });
+    const engine = createLiveEngine();
+    await engine.startSensors({ sensors: denied });
+    expect(engine.getSnapshot().sensorStartFailed).toBe('permission');
+
+    await expect(engine.startSensors({ sensors: granted })).resolves.toEqual({ ok: true });
+    expect(engine.sensorsActive()).toBe(true);
+    expect(engine.getSnapshot().sensorStartFailed).toBeUndefined();
+    expect(granted.Accelerometer.addListener).toHaveBeenCalledTimes(1);
+    expect(granted.Gyroscope.addListener).not.toHaveBeenCalled();
+    expect(granted.Magnetometer.addListener).not.toHaveBeenCalled();
+
+    for (const sample of deviceVerticalWalk(PLANTED, 3, 160)) granted.Accelerometer.emit(sample);
+    expect(engine.getSnapshot().stepCount).toBe(4);
+    expect(engine.getSnapshot().sensorStartFailed).toBeUndefined();
     engine.stopSensors();
   });
 
