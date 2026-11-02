@@ -14,9 +14,8 @@
  *    field can sit in the magnitude window and still be rotated. That
  *    does not end the hold.
  *
- * The first in-range magnetometer sample in a trusted level frame snaps
- * the heading. The recovery hold applies only after that fix has been
- * lost.
+ * The first fix waits for the same clean, stable `recoverHoldMs` window.
+ * It does not use the angle gate.
  *
  * Device frame: +x forward, +y right, +z down, microtesla.
  * `yawRate` is radians per second, positive clockwise.
@@ -100,9 +99,9 @@ export type HeadingFusionConfig = {
    * trusted. A stable recovery window outside this angle stays gyro-only.
    */
   reacquireMaxDeg: number;
-  /** Milliseconds of clean, stable magnetometer samples required to leave a hold. */
+  /** Milliseconds of clean, stable magnetometer samples required before a fix. */
   recoverHoldMs: number;
-  /** Heading used until the first trusted magnetometer sample, degrees. */
+  /** Heading used until the first stable magnetometer window, degrees. */
   initialHeadingDeg: number;
   /** Time constant for the trusted magnitude baseline, seconds. */
   baselineTauSeconds: number;
@@ -342,8 +341,13 @@ function applyMagnetometer(
   }
 
   if (state.phase.kind === 'open' || state.phase.kind === 'rejected') {
-    if (!magnitudeBad) acquire(state, t, magneticHeading, magnitudeUt);
-    else state.phase = { kind: 'rejected' };
+    if (magnitudeBad) {
+      state.phase = { kind: 'rejected' };
+      return { magneticHeading, magnitudeUt };
+    }
+    if (recoveryReady(state.recentMag, state.baselineUt, config)) {
+      acquire(state, t, magneticHeading, magnitudeUt);
+    }
     return { magneticHeading, magnitudeUt };
   }
 

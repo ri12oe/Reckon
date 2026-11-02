@@ -415,11 +415,16 @@ describe('live engine pushes', () => {
     expect(engine.getSnapshot().rawPath).toHaveLength(1);
   });
 
-  test('one east magnetometer sample snaps heading to 90°', () => {
+  test('one east magnetometer sample stays at 0°; a 400 ms window reaches 90°', () => {
     const engine = createLiveEngine();
     engine.pushMag({ t: 0, x: 0, y: -30, z: 40 });
-    expect(engine.getSnapshot().heading).toBeCloseTo(90, 6);
+    expect(engine.getSnapshot().heading).toBeCloseTo(0, 6);
+    expect(engine.getSnapshot().gyroOnly).toBe(true);
     expect(engine.getSnapshot().stepCount).toBe(0);
+
+    for (let t = 20; t <= 400; t += 20) engine.pushMag({ t, x: 0, y: -30, z: 40 });
+    expect(engine.getSnapshot().heading).toBeCloseTo(90, 6);
+    expect(engine.getSnapshot().gyroOnly).toBe(false);
   });
 
   test('non-finite pushes are ignored and a returned snapshot is a copy', () => {
@@ -461,7 +466,7 @@ describe('live engine pushes', () => {
 });
 
 describe('sensor feed into the live engine', () => {
-  test('119 mocked accelerometer callbacks and one magnetometer sample: 0 → 4 steps, 3 m east', async () => {
+  test('119 mocked accelerometer callbacks and a 400 ms magnetometer window: 0 → 4 steps, 3 m east', async () => {
     const sensors = motionSensors();
     const engine = createLiveEngine();
     const before = engine.getSnapshot();
@@ -484,7 +489,9 @@ describe('sensor feed into the live engine', () => {
     );
 
     for (const sample of samples) sensors.Accelerometer.emit(sample);
-    sensors.Magnetometer.emit({ x: -30, y: 0, z: -40, timestamp: 0 });
+    for (let t = 0; t <= 400; t += 20) {
+      sensors.Magnetometer.emit({ x: -30, y: 0, z: -40, timestamp: t / 1000 });
+    }
     sensors.Gyroscope.emit({ x: 0, y: 0, z: 0, timestamp: 0 });
 
     const after = engine.getSnapshot();

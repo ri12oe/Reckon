@@ -107,7 +107,7 @@ describe('sensor walk', () => {
     const engine = createLiveEngine();
 
     for (const sample of samples.slice().reverse()) engine.pushAccel(sample);
-    engine.pushMag({ t: 0, ...eastField() });
+    for (let t = 0; t <= 400; t += DT_MS) engine.pushMag({ t, ...eastField() });
 
     const before = engine.getSnapshot();
 
@@ -295,7 +295,7 @@ describe('sensor walk', () => {
     for (const sample of series) {
       if (sample.t <= 2100) engine.pushAccel(sample);
     }
-    engine.pushMag({ t: 0, ...eastField() });
+    for (let t = 0; t <= 400; t += DT_MS) engine.pushMag({ t, ...eastField() });
 
     const before = engine.getSnapshot();
     expect(before.stepCount).toBe(4);
@@ -383,7 +383,7 @@ describe('precomputed steps and headings', () => {
 
   test('a step heading displaces that step; the fused course stays 90°', () => {
     const engine = createLiveEngine({ stepLengthM: 1, drift: { corridor: false } });
-    engine.pushMag({ t: 0, ...eastField() });
+    for (let t = 0; t <= 400; t += DT_MS) engine.pushMag({ t, ...eastField() });
     engine.pushStep({ t: 1000, heading: 0 });
 
     const snapshot = engine.getSnapshot();
