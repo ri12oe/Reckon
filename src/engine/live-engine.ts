@@ -38,8 +38,7 @@
  * landmark. `reset()` drops samples, steps, and pins.
  *
  * `recallSnapshot` shows a saved walk from `getSnapshot` until `clearRecall`
- * or `reset`. It does not run the pipeline. Samples still accumulate and
- * show up again once the saved walk is cleared.
+ * or `reset`. It does not run the pipeline.
  */
 
 import {
@@ -371,12 +370,14 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
 
   const engine: LiveFloorwalkerEngine = {
     pushAccel(sample) {
+      if (recalled) return;
       stepsAcc.push(sample);
       examined += stepsAcc.takeExamined();
       if (accelAccepted(sample)) accepted = true;
       touch();
     },
     pushGyro(sample) {
+      if (recalled) return;
       const fold = fusion.pushGyro(sample);
       absorbHeadings(fold.headings);
       examined += fold.processed;
@@ -385,6 +386,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       touch();
     },
     pushMag(sample) {
+      if (recalled) return;
       const fold = fusion.pushMag(sample);
       absorbHeadings(fold.headings);
       examined += fold.processed;
@@ -400,11 +402,13 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       touch();
     },
     pushStep(step) {
+      if (recalled) return;
       explicitSteps.push(copyPathStep(step));
       if (Number.isFinite(step.t)) accepted = true;
       touch();
     },
     pushHeading(sample) {
+      if (recalled) return;
       headingSamples.push(copyHeading(sample));
       if (Number.isFinite(sample.t) && Number.isFinite(sample.heading)) accepted = true;
       touch();
@@ -526,6 +530,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     },
     startSensors(sensorOptions) {
       if (feed) return Promise.resolve({ ok: true });
+      if (recalled) return Promise.resolve({ ok: false, reason: 'cancelled' });
       if (starting) return starting;
 
       const token = generation;
