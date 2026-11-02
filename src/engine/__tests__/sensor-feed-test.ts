@@ -130,50 +130,127 @@ const PLANTED = [500, 1000, 1500, 2000];
 
 describe('sensorStartResult', () => {
   test('one subscribed sensor is not a start', () => {
-    expect(sensorStartResult(['subscribed', 'permission'])).toEqual({
+    expect(
+      sensorStartResult({
+        accelerometer: 'subscribed',
+        gyroscope: 'permission',
+        magnetometer: 'subscribed',
+      }),
+    ).toEqual({
       ok: false,
       reason: 'permission',
     });
-    expect(sensorStartResult(['unavailable', 'subscribed', 'subscribed'])).toEqual({
+    expect(
+      sensorStartResult({
+        accelerometer: 'unavailable',
+        gyroscope: 'subscribed',
+        magnetometer: 'subscribed',
+      }),
+    ).toEqual({
       ok: false,
       reason: 'unavailable',
     });
-    expect(sensorStartResult(['subscribed', 'unavailable', 'permission'])).toEqual({
+    expect(
+      sensorStartResult({
+        accelerometer: 'subscribed',
+        gyroscope: 'unavailable',
+        magnetometer: 'permission',
+      }),
+    ).toEqual({
       ok: false,
       reason: 'unavailable',
     });
-    expect(sensorStartResult(['error', 'subscribed', 'permission'])).toEqual({
+    expect(
+      sensorStartResult({
+        accelerometer: 'error',
+        gyroscope: 'subscribed',
+        magnetometer: 'permission',
+      }),
+    ).toEqual({
       ok: false,
       reason: 'error',
     });
-    expect(sensorStartResult(['subscribed', 'stopped', 'stopped'])).toEqual({
+    expect(
+      sensorStartResult({
+        accelerometer: 'subscribed',
+        gyroscope: 'stopped',
+        magnetometer: 'stopped',
+      }),
+    ).toEqual({
       ok: false,
       reason: 'cancelled',
     });
   });
 
   test('accelerometer and gyroscope together start, even when the magnetometer does not', () => {
-    expect(sensorStartResult(['subscribed', 'subscribed', 'unavailable'])).toEqual({ ok: true });
-    expect(sensorStartResult(['subscribed', 'subscribed', 'permission'])).toEqual({ ok: true });
-    expect(sensorStartResult(['subscribed', 'subscribed', 'error'])).toEqual({ ok: true });
-    expect(sensorStartResult(['subscribed', 'subscribed', 'stopped'])).toEqual({ ok: true });
+    expect(
+      sensorStartResult({
+        accelerometer: 'subscribed',
+        gyroscope: 'subscribed',
+        magnetometer: 'unavailable',
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      sensorStartResult({
+        accelerometer: 'subscribed',
+        gyroscope: 'subscribed',
+        magnetometer: 'permission',
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      sensorStartResult({
+        accelerometer: 'subscribed',
+        gyroscope: 'subscribed',
+        magnetometer: 'error',
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      sensorStartResult({
+        accelerometer: 'subscribed',
+        gyroscope: 'subscribed',
+        magnetometer: 'stopped',
+      }),
+    ).toEqual({ ok: true });
   });
 
   test('a miss on both required sensors prefers permission, then error', () => {
-    expect(sensorStartResult(['permission', 'unavailable', 'error'])).toEqual({
+    expect(
+      sensorStartResult({
+        accelerometer: 'permission',
+        gyroscope: 'unavailable',
+        magnetometer: 'error',
+      }),
+    ).toEqual({
       ok: false,
       reason: 'permission',
     });
-    expect(sensorStartResult(['stopped', 'error', 'unavailable'])).toEqual({
+    expect(
+      sensorStartResult({
+        accelerometer: 'stopped',
+        gyroscope: 'error',
+        magnetometer: 'unavailable',
+      }),
+    ).toEqual({
       ok: false,
       reason: 'error',
     });
-    expect(sensorStartResult(['unavailable', 'unavailable'])).toEqual({
+    expect(
+      sensorStartResult({
+        accelerometer: 'unavailable',
+        gyroscope: 'unavailable',
+        magnetometer: 'error',
+      }),
+    ).toEqual({
       ok: false,
       reason: 'unavailable',
     });
-    expect(sensorStartResult(['stopped', 'stopped'])).toEqual({ ok: false, reason: 'cancelled' });
-    expect(sensorStartResult([])).toEqual({ ok: false, reason: 'cancelled' });
+    expect(
+      sensorStartResult({
+        accelerometer: 'stopped',
+        gyroscope: 'stopped',
+        magnetometer: 'stopped',
+      }),
+    ).toEqual({ ok: false, reason: 'cancelled' });
   });
 });
 
