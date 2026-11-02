@@ -57,12 +57,12 @@ function memoryDb(initial: CalibrationRow | null = null): FakeDb {
   };
 }
 
-function east(engine: { pushStep(step: { t: number; heading: number }): void }) {
-  engine.pushStep({ t: 100, heading: 90 });
+function east(engine: { pushStep(step: { t: number; heading: number }): void }, t: number) {
+  engine.pushStep({ t, heading: 90 });
 }
 
 describe('walk poll after a late database open', () => {
-  test('a step taken before the database opens uses the saved length on the next poll', () => {
+  test('a step taken after a late open uses the saved length while the earlier step stays', () => {
     state.db = null;
     jest.isolateModules(() => {
       // isolateModules only accepts a synchronous factory.
@@ -71,18 +71,28 @@ describe('walk poll after a late database open', () => {
       const poll = createWalkPoll();
       const early = poll([]);
       expect(early.engine.getStepLength()).toBe(0.75);
-      east(early.engine);
+      east(early.engine, 100);
       const stepped = poll([]);
       expect(stepped.engine).toBe(early.engine);
       expect(stepped.view.shown.stepCount).toBe(1);
       expect(stepped.view.shown.rawPath[1]!.x).toBe(0.75);
+      expect(stepped.view.shown.correctedPath[1]!.x).toBe(0.75);
 
       state.db = memoryDb(savedLength);
+      const opened = poll([]);
+      expect(opened.engine).toBe(early.engine);
+      expect(opened.engine.getStepLength()).toBe(0.625);
+      expect(opened.view.shown.stepCount).toBe(1);
+      expect(opened.view.shown.rawPath[1]!.x).toBe(0.75);
+      expect(opened.view.shown.correctedPath[1]!.x).toBe(0.75);
+      east(opened.engine, 200);
       const live = poll([]);
       expect(live.engine).toBe(early.engine);
-      expect(live.engine.getStepLength()).toBe(0.625);
-      expect(live.view.shown.stepCount).toBe(1);
-      expect(live.view.shown.rawPath[1]!.x).toBe(0.625);
+      expect(live.view.shown.stepCount).toBe(2);
+      expect(live.view.shown.rawPath[1]!.x).toBe(0.75);
+      expect(live.view.shown.correctedPath[1]!.x).toBe(0.75);
+      expect(live.view.shown.rawPath[2]!.x).toBe(1.375);
+      expect(live.view.shown.correctedPath[2]!.x).toBe(1.375);
     });
   });
 
@@ -94,7 +104,7 @@ describe('walk poll after a late database open', () => {
       const poll = createWalkPoll();
       const first = poll([]);
       expect(first.engine.getStepLength()).toBe(0.625);
-      east(first.engine);
+      east(first.engine, 100);
       const again = poll([]);
       expect(again.engine).toBe(first.engine);
       expect(again.view.shown.stepCount).toBe(1);
@@ -109,7 +119,7 @@ describe('walk poll after a late database open', () => {
       const { createWalkPoll } = require('@/walk/live-poll') as typeof import('@/walk/live-poll');
       const poll = createWalkPoll();
       const early = poll([]);
-      east(early.engine);
+      east(early.engine, 100);
       const stepped = poll([]);
       expect(stepped.view.shown.rawPath[1]!.x).toBe(0.75);
       state.db = memoryDb();
