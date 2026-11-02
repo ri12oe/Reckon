@@ -92,6 +92,11 @@ export type LiveEngineConfig = {
   /** Meters per step before a calibration. Default 0.75. */
   stepLengthM?: number;
   /**
+   * Finite meters `reset` restores. The shared engine reads the saved
+   * calibration. Omit it and `reset` restores the constructor length.
+   */
+  readStepLengthM?: () => number | undefined;
+  /**
    * Drift passes. Corridor snap is off unless `corridor` is `true` or a
    * config object. Omitting it, or `corridor: false`, leaves headings alone.
    */
@@ -487,7 +492,8 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       baked.length = 0;
       explicitSteps.length = 0;
       headingSamples.length = 0;
-      stepLengthM = initialLength;
+      const read = config?.readStepLengthM?.();
+      stepLengthM = read !== undefined && Number.isFinite(read) ? read : initialLength;
       takenLengths = [];
       drift = cloneDrift(initialDrift);
       accepted = false;
