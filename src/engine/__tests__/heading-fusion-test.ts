@@ -478,6 +478,39 @@ describe('fuseHeading', () => {
     expect(at(fused, 6000).heading).toBeCloseTo(90, 6);
   });
 
+  test('90°/s across a 1.5 s silent gap stays at 0° instead of adding 135°', () => {
+    const fused = fuseHeading(
+      [
+        { t: 0, yawRate: yaw(90) },
+        { t: 1500, yawRate: 0 },
+      ],
+      [],
+    );
+
+    expect(at(fused, 0).heading).toBe(0);
+    expect(at(fused, 1500).heading).toBe(0);
+  });
+
+  test('90°/s across 150 ms adds 13.5° and across 151 ms adds nothing', () => {
+    const held = fuseHeading(
+      [
+        { t: 0, yawRate: yaw(90) },
+        { t: 150, yawRate: 0 },
+      ],
+      [],
+    );
+    const dropped = fuseHeading(
+      [
+        { t: 0, yawRate: yaw(90) },
+        { t: 151, yawRate: 0 },
+      ],
+      [],
+    );
+
+    expect(at(held, 150).heading).toBeCloseTo(13.5, 6);
+    expect(at(dropped, 151).heading).toBe(0);
+  });
+
   test('mag before a trusted level frame stays at 0° with no hold; the same east field acquires 90° at 500 ms', () => {
     const early = clock(0, 480);
     const late = clock(500, 1000);
@@ -542,11 +575,15 @@ describe('fuseHeading', () => {
     const gyro = gyroAt(times, 3);
     const mag = magAt(times, north());
     const brake = fuseHeading(
-      [...gyro, { t: 10000, brake: true }, { t: 12000, yawRate: yaw(90) }],
+      [...gyro, { t: 10000, brake: true }, { t: 10150, yawRate: yaw(90) }],
       mag,
     );
     const still = fuseHeading(
-      [...gyro, { t: 10000, yawRate: 0 }, { t: 12000, yawRate: yaw(90) }],
+      [...gyro, { t: 10000, yawRate: 0 }, { t: 10150, yawRate: yaw(90) }],
+      mag,
+    );
+    const stalled = fuseHeading(
+      [...gyro, { t: 10000, yawRate: 0 }, { t: 11500, yawRate: yaw(90) }],
       mag,
     );
     const bias = 3 * (1 - Math.exp(-10 / 5));
@@ -555,8 +592,12 @@ describe('fuseHeading', () => {
       return turn === 0 ? 0 : turn;
     };
 
-    expect(at(brake, 12000).heading).toBeCloseTo(at(brake, 10000).heading, 6);
-    expect(at(still, 12000).heading).toBeCloseTo(wrapped(at(still, 10000).heading - bias * 2), 4);
+    expect(at(brake, 10150).heading).toBeCloseTo(at(brake, 10000).heading, 6);
+    expect(at(still, 10150).heading).toBeCloseTo(
+      wrapped(at(still, 10000).heading - bias * 0.15),
+      4,
+    );
+    expect(at(stalled, 11500).heading).toBeCloseTo(at(stalled, 10000).heading, 6);
   });
 });
 

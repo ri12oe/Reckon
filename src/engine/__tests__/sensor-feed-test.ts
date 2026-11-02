@@ -296,7 +296,7 @@ describe('live engine pushes', () => {
     expect(after.correctedPath).not.toBe(after.rawPath);
   });
 
-  test('a clockwise gyro sample held for 1 s turns heading 0° → 90°', () => {
+  test('a clockwise gyro sample held across 1 s stays at 0°', () => {
     const engine = createLiveEngine();
     expect(engine.getSnapshot().heading).toBe(0);
     expect(engine.getSnapshot().stepCount).toBe(0);
@@ -304,7 +304,7 @@ describe('live engine pushes', () => {
     engine.pushGyro({ t: 0, yawRate: Math.PI / 2 });
     engine.pushGyro({ t: 1000, yawRate: Math.PI / 2 });
 
-    expect(engine.getSnapshot().heading).toBeCloseTo(90, 6);
+    expect(engine.getSnapshot().heading).toBe(0);
     expect(engine.getSnapshot().stepCount).toBe(0);
     expect(engine.getSnapshot().rawPath).toHaveLength(1);
   });
@@ -460,8 +460,9 @@ describe('sensor feed into the live engine', () => {
     await engine.startSensors({ sensors });
     expect(engine.getSnapshot().heading).toBe(0);
 
-    sensors.Gyroscope.emit({ x: 0, y: 0, z: -Math.PI / 2, timestamp: 0 });
-    sensors.Gyroscope.emit({ x: 0, y: 0, z: -Math.PI / 2, timestamp: 1 });
+    for (let step = 0; step <= 50; step += 1) {
+      sensors.Gyroscope.emit({ x: 0, y: 0, z: -Math.PI / 2, timestamp: step * 0.02 });
+    }
 
     expect(engine.getSnapshot().heading).toBeCloseTo(90, 6);
     expect(engine.getSnapshot().stepCount).toBe(0);
