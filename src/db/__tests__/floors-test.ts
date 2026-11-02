@@ -5,7 +5,7 @@ import {
   type FloorStore,
   type SqlExecutor,
 } from '@/db/floors';
-import { FLOOR_SCHEMA } from '@/db/schema';
+import { applyFloorSchema } from '@/db/schema';
 import { mockEngine } from '@/engine/mock-engine';
 import type { EngineSnapshot } from '@/engine/types';
 
@@ -226,7 +226,6 @@ function behavesLikeFloorStore(name: string, open: () => FloorStore | Promise<Fl
 function openSqlite(): FloorStore {
   const { DatabaseSync } = loadSqlite();
   const db = wrap(new DatabaseSync(':memory:'));
-  db.execSync(FLOOR_SCHEMA);
   return createSqliteFloorStore(db, { now: clock() });
 }
 
@@ -257,9 +256,110 @@ function wrap(db: SqliteDatabase): SqlExecutor {
   };
 }
 
+const LEGACY_FLOOR_DDL = `
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS buildings (
+  id TEXT PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS floors (
+  id TEXT PRIMARY KEY NOT NULL,
+  building_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  step_count INTEGER NOT NULL,
+  heading REAL NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (building_id) REFERENCES buildings (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS path_points (
+  floor_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('raw', 'corrected')),
+  seq INTEGER NOT NULL,
+  x REAL NOT NULL,
+  y REAL NOT NULL,
+  t REAL NOT NULL,
+  PRIMARY KEY (floor_id, kind, seq),
+  FOREIGN KEY (floor_id) REFERENCES floors (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pins (
+  floor_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  x REAL NOT NULL,
+  y REAL NOT NULL,
+  label TEXT NOT NULL,
+  PRIMARY KEY (floor_id, seq),
+  FOREIGN KEY (floor_id) REFERENCES floors (id) ON DELETE CASCADE
+);
+`;
+
 describe('floor stores', () => {
   behavesLikeFloorStore('memory', () => createMemoryFloorStore({ now: clock() }));
   behavesLikeFloorStore('sqlite', openSqlite);
+
+  test('sqlite opens a floor saved before gyro_only existed', () => {
+    const { DatabaseSync } = loadSqlite();
+    const db = wrap(new DatabaseSync(':memory:'));
+    db.execSync(LEGACY_FLOOR_DDL);
+    db.runSync(
+      'INSERT INTO buildings (id, name, created_at) VALUES (?, ?, ?)',
+      'bldg_old',
+      'North Hall',
+      1_000,
+    );
+    db.runSync(
+      `INSERT INTO floors (id, building_id, name, step_count, heading, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'floor_old',
+      'bldg_old',
+      'Level 1',
+      3,
+      90,
+      1_000,
+    );
+    db.runSync(
+      'INSERT INTO path_points (floor_id, kind, seq, x, y, t) VALUES (?, ?, ?, ?, ?, ?)',
+      'floor_old',
+      'corrected',
+      0,
+      4,
+      5,
+      6,
+    );
+
+    applyFloorSchema(db);
+    applyFloorSchema(db);
+    const store = createSqliteFloorStore(db, { now: clock() });
+    const loaded = store.get('floor_old');
+    expect(loaded?.snapshot.correctedPath).toEqual([{ x: 4, y: 5, t: 6 }]);
+    expect(loaded?.snapshot.gyroOnly).toBeUndefined();
+
+    const saved = store.save({
+      buildingName: 'North Hall',
+      floorName: 'Gyro',
+      snapshot: { ...sample(), gyroOnly: true },
+    });
+    expect(store.get(saved.id)?.snapshot.gyroOnly).toBe(true);
+  });
+
+  test('sqlite applyFloorSchema twice on a new file round-trips gyroOnly true', () => {
+    const { DatabaseSync } = loadSqlite();
+    const db = wrap(new DatabaseSync(':memory:'));
+    applyFloorSchema(db);
+    applyFloorSchema(db);
+    const store = createSqliteFloorStore(db, { now: clock() });
+    const saved = store.save({
+      buildingName: 'North Hall',
+      floorName: 'Gyro',
+      snapshot: { ...sample(), gyroOnly: true },
+    });
+    expect(store.get(saved.id)?.snapshot.gyroOnly).toBe(true);
+  });
 
   test('sqlite creates the floor tables', () => {
     const { DatabaseSync } = loadSqlite();
