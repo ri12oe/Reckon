@@ -20,7 +20,11 @@
  * arrive. A snapshot replays the unsettled tail, not the walk so far.
  * Once a step's heading can no longer change, that heading stays on the
  * step and the raw samples behind it are dropped. The tail is capped, so
- * a long walk does not keep every IMU sample.
+ * a long walk does not keep every IMU sample. A heading baked before the
+ * first trusted magnetometer fix is still provisional. That fix rotates
+ * those steps by the jump from the last gyro sample, once. A step that
+ * already carries its own heading is left as given. A later interference
+ * hold does not rotate the path again.
  *
  * `emptySnapshot`, when set, is what `getSnapshot` returns until the first
  * finite accel, gyro, mag, step, or heading sample. `reset()` arms it again.
@@ -56,8 +60,11 @@ import {
 import { emptyRecording, isCannedDemo } from '@/engine/mock-engine';
 import {
   DEFAULT_STEP_LENGTH_M,
+  firstAcquireBias,
+  headingWithAcquireBias,
   integratePath,
   stepLengthsFor,
+  type AcquireBias,
   type HeadingSample,
   type PathStep,
   type RecordedStepLength,
@@ -201,9 +208,12 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   const stepsAcc = createStepAccumulator(stepDetectorConfig);
   const fusion = createHeadingFusion(headingFusionConfig);
   const fusedHeadings: HeadingSample[] = [];
-  /** Detected steps whose heading is finished. Parallel to the committed prefix. */
+  /** Detected steps whose heading is the gyro hold. Parallel to the committed prefix. */
   const baked: PathStep[] = [];
   const explicitSteps: PathStep[] = [];
+  /** Gyro heading baked onto an explicit step that did not bring its own. */
+  let explicitProvisional = new WeakMap<PathStep, number>();
+  let acquireBias: AcquireBias | null = null;
   const headingSamples: HeadingSample[] = [];
   let stepLengthM = initialLength;
   let takenLengths: readonly RecordedStepLength[] = [];
@@ -222,16 +232,33 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     cached = null;
   };
 
+  function courseHeading(heading: number, t: number): number {
+    return headingWithAcquireBias(heading, t, acquireBias);
+  }
+
   function currentSteps(): PathStep[] {
     if (explicitSteps.some((step) => Number.isFinite(step.t))) {
-      return explicitSteps.map(copyPathStep);
+      return explicitSteps.map((step) => {
+        const copy = copyPathStep(step);
+        if (copy.heading !== undefined) return copy;
+        const provisional = explicitProvisional.get(step);
+        if (provisional === undefined) return copy;
+        return { t: step.t, heading: courseHeading(provisional, step.t) };
+      });
     }
     const detected = stepsAcc.steps();
     examined += stepsAcc.takeExamined();
     if (!stepsAcc.prefixStable()) return detected.map((step) => ({ t: step.t }));
     return detected.map((step, index) => {
       const settled = baked[index];
-      if (settled && settled.t === step.t) return { t: step.t, heading: settled.heading };
+      if (
+        settled &&
+        settled.t === step.t &&
+        settled.heading !== undefined &&
+        Number.isFinite(settled.heading)
+      ) {
+        return { t: step.t, heading: courseHeading(settled.heading, step.t) };
+      }
       return { t: step.t };
     });
   }
@@ -239,11 +266,16 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   function headingCourse(): Course {
     const replay = fusion.replayPending();
     examined += replay.processed;
+    const merged = mergedHeadings(replay.headings);
+    noteAcquire(merged);
     const latest = replay.headings[replay.headings.length - 1] ?? fusion.latestSettled();
     if (latest) {
       return {
         kind: 'fused',
-        samples: mergedHeadings(replay.headings),
+        samples: merged.map((sample) => ({
+          t: sample.t,
+          heading: courseHeading(sample.heading, sample.t),
+        })),
         heading: latest.heading,
         gyroOnly: latest.gyroOnly,
       };
@@ -294,20 +326,42 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     return snapshot;
   }
 
+  function noteAcquire(samples: readonly HeadingSample[]): void {
+    if (acquireBias) return;
+    const bias = firstAcquireBias(samples);
+    if (bias) acquireBias = bias;
+  }
+
   function absorbHeadings(headings: readonly FusedHeading[]): void {
     for (const heading of headings) {
       const previous = fusedHeadings[fusedHeadings.length - 1];
-      if (previous && previous.t === heading.t) previous.heading = heading.heading;
-      else fusedHeadings.push({ t: heading.t, heading: heading.heading });
+      if (previous && previous.t === heading.t) {
+        previous.heading = heading.heading;
+        previous.gyroOnly = heading.gyroOnly;
+      } else {
+        fusedHeadings.push({
+          t: heading.t,
+          heading: heading.heading,
+          gyroOnly: heading.gyroOnly,
+        });
+      }
     }
   }
 
   function mergedHeadings(replay: readonly FusedHeading[]): HeadingSample[] {
-    const samples = fusedHeadings.map(copyHeading);
+    const samples = fusedHeadings.map(copyStoredHeading);
     for (const heading of replay) {
       const previous = samples[samples.length - 1];
-      if (previous && previous.t === heading.t) previous.heading = heading.heading;
-      else samples.push({ t: heading.t, heading: heading.heading });
+      if (previous && previous.t === heading.t) {
+        previous.heading = heading.heading;
+        previous.gyroOnly = heading.gyroOnly;
+      } else {
+        samples.push({
+          t: heading.t,
+          heading: heading.heading,
+          gyroOnly: heading.gyroOnly,
+        });
+      }
     }
     return samples;
   }
@@ -342,7 +396,8 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     for (const step of explicitSteps) {
       if (step.heading !== undefined && Number.isFinite(step.heading)) continue;
       if (!(step.t < collapseBefore)) continue;
-      step.heading = holdHeading(fusedHeadings, step.t);
+      if (explicitProvisional.has(step)) continue;
+      explicitProvisional.set(step, holdHeading(fusedHeadings, step.t));
     }
   }
 
@@ -365,6 +420,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     let collapseBefore = oldestPending ?? Number.POSITIVE_INFINITY;
     if (horizon !== null && horizon < collapseBefore) collapseBefore = horizon;
 
+    noteAcquire(fusedHeadings);
     alignBaked(collapseBefore);
     bakeExplicit(collapseBefore);
     if (stepsAcc.prefixStable()) collapseHeadings(collapseBefore);
@@ -491,6 +547,8 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       fusedHeadings.length = 0;
       baked.length = 0;
       explicitSteps.length = 0;
+      explicitProvisional = new WeakMap();
+      acquireBias = null;
       headingSamples.length = 0;
       const read = config?.readStepLengthM?.();
       stepLengthM = read !== undefined && Number.isFinite(read) ? read : initialLength;
@@ -746,6 +804,12 @@ function copyPathStep(step: PathStep): PathStep {
 
 function copyHeading(sample: HeadingSample): HeadingSample {
   return { t: sample.t, heading: sample.heading };
+}
+
+function copyStoredHeading(sample: HeadingSample): HeadingSample {
+  const copy = copyHeading(sample);
+  if (sample.gyroOnly !== undefined) copy.gyroOnly = sample.gyroOnly;
+  return copy;
 }
 
 function gyroAccepted(sample: GyroSample): boolean {
