@@ -22,6 +22,16 @@ describe('walk pin drop', () => {
     expect(engine.getSnapshot().pins.map((item) => item.id)).toEqual(['door', 'desk']);
   });
 
+  test('a start fault on the demo still holds the pin instead of storing it', () => {
+    const demo = mockEngine.getSnapshot();
+    const shown = { ...demo, sensorStartFailed: 'permission' as const };
+    const dropped = dropWalkPin(shown, demo, false, [], pin);
+
+    expect(dropped.commit).toEqual([]);
+    expect(dropped.held).toEqual([pin]);
+    expect(dropped.shown.sensorStartFailed).toBe('permission');
+  });
+
   test('a pin dropped on a live walk is stored at the live end', () => {
     const demo = mockEngine.getSnapshot();
     const engine = createLiveEngine({ emptySnapshot: demo });

@@ -32,3 +32,7 @@ export function formatHeading(heading: number): string {
   const degrees = Number.isFinite(heading) ? Math.round(((heading % 360) + 360) % 360) : 0;
   return `${degrees % 360}° ${compassPoint(heading)}`;
 }
+
+export function headingIsGyroOnly(gyroOnly: boolean | undefined): boolean {
+  return gyroOnly === true;
+}
