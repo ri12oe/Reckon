@@ -245,6 +245,17 @@ describe('floor stores', () => {
     expect(floorExportDocument(plainFloor).snapshot.gyroOnly).toBeUndefined();
   });
 
+  test('sqlite save keeps gyroOnly on the returned floor and reload drops it', () => {
+    const store = openSqlite();
+    const saved = store.save({
+      buildingName: 'North Hall',
+      floorName: 'Gyro',
+      snapshot: { ...sample(), gyroOnly: true },
+    });
+    expect(saved.snapshot.gyroOnly).toBe(true);
+    expect(store.get(saved.id)?.snapshot.gyroOnly).toBeUndefined();
+  });
+
   test('sqlite creates the floor tables', () => {
     const { DatabaseSync } = loadSqlite();
     const raw = new DatabaseSync(':memory:');
