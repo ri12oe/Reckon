@@ -348,10 +348,11 @@ describe('level attitude math', () => {
   });
 });
 
+/** Unleveled feed. A compass farther than the reacquire gate stays on the gyro. */
 const MASTER_SQUARE: Record<number, { headings: number[]; errorM: number }> = {
   0: { headings: [0, 90, 180, 270], errorM: 0 },
-  45: { headings: [180, 141.7762, 180.8448, 228.0267], errorM: 14.1645 },
-  65: { headings: [180, 145.8821, 177.2217, 217.2856], errorM: 14.7914 },
+  45: { headings: [180, 242.9629, 306.6025, 10.2421], errorM: 6.0836 },
+  65: { headings: [180, 215.5936, 253.6293, 291.6649], errorM: 12.0556 },
 };
 
 function expectHeadings(actual: readonly number[], expected: readonly number[]): void {
