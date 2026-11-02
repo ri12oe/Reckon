@@ -20,6 +20,7 @@ import {
 import { lightHaptic } from '@/haptics';
 import { useTheme } from '@/hooks/use-theme';
 import { walkPill } from '@/sensor-start';
+import { createWalkPoll } from '@/walk/live-poll';
 import { dropWalkPin, readWalk, type HeldPin, type WalkPinRead } from '@/walk/pin-drop';
 import { formatDistance, formatHeading, headingIsGyroOnly, pathLength } from '@/walk/stats';
 
@@ -43,22 +44,21 @@ export default function WalkScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      const engine = getEngine();
+      const poll = createWalkPoll();
       let stopped = false;
 
       const read = () => {
-        const next = engine.getSnapshot();
+        const frame = poll(heldRef.current);
+        const next = frame.view.shown;
         if (next.stepCount > stepsRef.current) lightHaptic();
         stepsRef.current = next.stepCount;
         setActive(getActiveFloor());
-        applyPinRead(
-          engine,
-          readWalk(next, mockEngine.getSnapshot(), engine.isRecalled(), heldRef.current),
-        );
+        applyPinRead(frame.engine, frame.view);
       };
 
       read();
       const timer = setInterval(read, POLL_MS);
+      const engine = poll(heldRef.current).engine;
       void engine.startSensors().then((started) => {
         if (stopped) return;
         if (!started.ok && started.reason === 'cancelled') return;
