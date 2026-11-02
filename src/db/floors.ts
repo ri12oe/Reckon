@@ -1,4 +1,4 @@
-import { FLOOR_SCHEMA } from '@/db/schema';
+import { applyFloorSchema } from '@/db/schema';
 import { emptyRecording, isCannedDemo } from '@/engine/mock-engine';
 import type { EngineSnapshot, PathPoint, Pin } from '@/engine/types';
 
@@ -58,7 +58,7 @@ export type SqlExecutor = {
 };
 
 type BuildingRow = { id: string };
-type FloorListRow = {
+type FloorColumns = {
   id: string;
   building_id: string;
   building_name: string;
@@ -66,17 +66,13 @@ type FloorListRow = {
   step_count: number;
   heading: number;
   created_at: number;
+};
+type FloorListRow = FloorColumns & {
   point_count: number;
   pin_count: number;
 };
-type FloorRow = {
-  id: string;
-  building_id: string;
-  building_name: string;
-  name: string;
-  step_count: number;
-  heading: number;
-  created_at: number;
+type FloorRow = FloorColumns & {
+  gyro_only: unknown;
 };
 type PointRow = { kind: string; x: number; y: number; t: number };
 type PinRow = { id: string; x: number; y: number; label: string };
@@ -144,7 +140,7 @@ export function createMemoryFloorStore(options?: StoreOptions): FloorStore {
 }
 
 export function createSqliteFloorStore(db: SqlExecutor, options?: StoreOptions): FloorStore {
-  db.execSync(FLOOR_SCHEMA);
+  applyFloorSchema(db);
   const now = options?.now ?? Date.now;
   const createId = options?.createId ?? defaultCreateId;
 
@@ -172,14 +168,16 @@ export function createSqliteFloorStore(db: SqlExecutor, options?: StoreOptions):
         }
         const floor = toStored(createId('floor'), buildingId, prepared);
         db.runSync(
-          `INSERT INTO floors (id, building_id, name, step_count, heading, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO floors (
+             id, building_id, name, step_count, heading, created_at, gyro_only
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
           floor.id,
           floor.buildingId,
           floor.name,
           floor.stepCount,
           floor.heading,
           floor.createdAt,
+          gyroOnlyToCell(floor.snapshot.gyroOnly),
         );
         insertPath(db, floor.id, 'raw', floor.snapshot.rawPath);
         insertPath(db, floor.id, 'corrected', floor.snapshot.correctedPath);
@@ -203,7 +201,7 @@ export function createSqliteFloorStore(db: SqlExecutor, options?: StoreOptions):
       const row = db.getFirstSync<FloorRow>(
         `SELECT f.id AS id, f.building_id AS building_id, b.name AS building_name,
                 f.name AS name, f.step_count AS step_count, f.heading AS heading,
-                f.created_at AS created_at
+                f.created_at AS created_at, f.gyro_only AS gyro_only
          FROM floors f
          JOIN buildings b ON b.id = f.building_id
          WHERE f.id = ?`,
@@ -222,13 +220,16 @@ export function createSqliteFloorStore(db: SqlExecutor, options?: StoreOptions):
       const correctedPath = points.filter((point) => point.kind === 'corrected').map(readPoint);
       return {
         ...summaryFromCounts(row, correctedPath.length, pins.length),
-        snapshot: {
-          rawPath,
-          correctedPath,
-          stepCount: Number(row.step_count),
-          heading: Number(row.heading),
-          pins: pins.map(readPin),
-        },
+        snapshot: withGyroOnly(
+          {
+            rawPath,
+            correctedPath,
+            stepCount: Number(row.step_count),
+            heading: Number(row.heading),
+            pins: pins.map(readPin),
+          },
+          gyroOnlyFromCell(row.gyro_only),
+        ),
       };
     },
     delete(id) {
@@ -319,7 +320,7 @@ function summaryFromRow(row: FloorListRow): FloorSummary {
   return summaryFromCounts(row, Number(row.point_count), Number(row.pin_count));
 }
 
-function summaryFromCounts(row: FloorRow, pointCount: number, pinCount: number): FloorSummary {
+function summaryFromCounts(row: FloorColumns, pointCount: number, pinCount: number): FloorSummary {
   return {
     id: row.id,
     buildingId: row.building_id,
@@ -376,15 +377,44 @@ function recordingForSave(snapshot: EngineSnapshot): EngineSnapshot {
 }
 
 function cloneSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
-  const copy: EngineSnapshot = {
-    rawPath: snapshot.rawPath.map(copyPoint),
-    correctedPath: snapshot.correctedPath.map(copyPoint),
-    stepCount: Number.isFinite(snapshot.stepCount) ? snapshot.stepCount : 0,
-    heading: Number.isFinite(snapshot.heading) ? snapshot.heading : 0,
-    pins: snapshot.pins.map(copyPin),
-  };
-  if (snapshot.gyroOnly !== undefined) copy.gyroOnly = snapshot.gyroOnly;
-  return copy;
+  return withGyroOnly(
+    {
+      rawPath: snapshot.rawPath.map(copyPoint),
+      correctedPath: snapshot.correctedPath.map(copyPoint),
+      stepCount: Number.isFinite(snapshot.stepCount) ? snapshot.stepCount : 0,
+      heading: Number.isFinite(snapshot.heading) ? snapshot.heading : 0,
+      pins: snapshot.pins.map(copyPin),
+    },
+    snapshot.gyroOnly,
+  );
+}
+
+type GyroOnlyCell = 0 | 1 | null;
+
+type PersistedWalkBase = Pick<
+  EngineSnapshot,
+  'rawPath' | 'correctedPath' | 'stepCount' | 'heading' | 'pins'
+>;
+
+type PersistedWalk = PersistedWalkBase & {
+  gyroOnly?: boolean;
+};
+
+function gyroOnlyToCell(flag: boolean | undefined): GyroOnlyCell {
+  if (flag === true) return 1;
+  if (flag === false) return 0;
+  return null;
+}
+
+function gyroOnlyFromCell(cell: unknown): boolean | undefined {
+  if (cell === 1) return true;
+  if (cell === 0) return false;
+  return undefined;
+}
+
+function withGyroOnly(base: PersistedWalkBase, gyroOnly: boolean | undefined): PersistedWalk {
+  if (gyroOnly === true || gyroOnly === false) return { ...base, gyroOnly };
+  return base;
 }
 
 function copyPoint(point: PathPoint): PathPoint {

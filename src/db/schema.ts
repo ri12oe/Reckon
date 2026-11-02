@@ -1,8 +1,4 @@
-/**
- * Buildings, floors, path points, and pins.
- * `execSync` this on open. Every statement is idempotent.
- */
-export const FLOOR_SCHEMA = `
+const FLOOR_SCHEMA = `
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS buildings (
@@ -18,6 +14,7 @@ CREATE TABLE IF NOT EXISTS floors (
   step_count INTEGER NOT NULL,
   heading REAL NOT NULL,
   created_at INTEGER NOT NULL,
+  gyro_only INTEGER,
   FOREIGN KEY (building_id) REFERENCES buildings (id) ON DELETE CASCADE
 );
 
@@ -43,3 +40,19 @@ CREATE TABLE IF NOT EXISTS pins (
   FOREIGN KEY (floor_id) REFERENCES floors (id) ON DELETE CASCADE
 );
 `;
+
+type FloorSchemaDb = {
+  execSync(source: string): void;
+  getAllSync<Row>(source: string, ...params: (string | number | null)[]): Row[];
+};
+
+type FloorColumnInfo = {
+  name: string;
+};
+
+export function applyFloorSchema(db: FloorSchemaDb): void {
+  db.execSync(FLOOR_SCHEMA);
+  const columns = db.getAllSync<FloorColumnInfo>('PRAGMA table_info(floors)');
+  if (columns.some((column) => column.name === 'gyro_only')) return;
+  db.execSync('ALTER TABLE floors ADD COLUMN gyro_only INTEGER');
+}
