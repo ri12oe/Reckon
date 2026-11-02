@@ -14,8 +14,9 @@
  *    field can sit in the magnitude window and still be rotated. That
  *    does not end the hold.
  *
- * The first in-range magnetometer sample snaps the heading. The recovery
- * hold applies only after that fix has been lost.
+ * The first in-range magnetometer sample in a trusted level frame snaps
+ * the heading. The recovery hold applies only after that fix has been
+ * lost.
  *
  * Device frame: +x forward, +y right, +z down, microtesla.
  * `yawRate` is radians per second, positive clockwise.
@@ -164,7 +165,14 @@ export function fuseHeading(
 
 type YawEvent =
   { t: number; rank: 0; kind: 'measured'; yawRate: number } | { t: number; rank: 0; kind: 'brake' };
-type MagEvent = { t: number; rank: 1; x: number; y: number; z: number };
+type MagEvent = {
+  t: number;
+  rank: 1;
+  x: number;
+  y: number;
+  z: number;
+  levelReady: boolean;
+};
 type TimedEvent = YawEvent | MagEvent;
 
 type HeldYaw = { kind: 'brake' } | { kind: 'measured'; degPerSec: number };
@@ -232,7 +240,14 @@ function collectEvents(gyro: readonly GyroSample[], mag: readonly MagSample[]): 
     ) {
       continue;
     }
-    events.push({ t: sample.t, rank: 1, x: sample.x, y: sample.y, z: sample.z });
+    events.push({
+      t: sample.t,
+      rank: 1,
+      x: sample.x,
+      y: sample.y,
+      z: sample.z,
+      levelReady: sample.levelReady !== false,
+    });
   }
 
   events.sort((a, b) => a.t - b.t || a.rank - b.rank);
@@ -300,6 +315,8 @@ function applyMagnetometer(
   const magnitudeUt = magneticFieldMagnitude(mag.x, mag.y, mag.z);
   const horizontal = Math.hypot(mag.x, mag.y);
   const magneticHeading = horizontal > 0 ? magneticHeadingDeg(mag.x, mag.y) : null;
+  if (!mag.levelReady) return { magneticHeading, magnitudeUt };
+
   const headingUsable =
     magneticHeading !== null &&
     horizontal >= config.minHorizontalUt &&
@@ -645,7 +662,14 @@ function magEvent(sample: MagSample): TimedEvent | null {
   ) {
     return null;
   }
-  return { t: sample.t, rank: 1, x: sample.x, y: sample.y, z: sample.z };
+  return {
+    t: sample.t,
+    rank: 1,
+    x: sample.x,
+    y: sample.y,
+    z: sample.z,
+    levelReady: sample.levelReady !== false,
+  };
 }
 
 function cloneState(state: FusionState): FusionState {
