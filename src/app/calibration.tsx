@@ -2,13 +2,12 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
-import { commitStepLength } from '@/calibration/commit';
+import { createHallwayCalibration } from '@/calibration/hallway';
 import {
   CALIBRATION_STEPS,
   beginCalibration,
   cancelCalibration,
   leaveCalibration,
-  noteSteps,
   parseCourseMeters,
   stepsTowardCalibration,
   type CalibrationSession,
@@ -46,8 +45,8 @@ export default function CalibrationScreen() {
   );
   const sessionRef = useRef(session);
   const distanceTextRef = useRef(distanceText);
-  const distanceRef = useRef<number | null>(null);
   const startRef = useRef<() => void>(() => undefined);
+  const endRef = useRef<() => void>(() => undefined);
   const cancelRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
@@ -95,10 +94,15 @@ export default function CalibrationScreen() {
         if (next.phase !== 'walking') return;
         const engine = createLiveEngine();
         calibration = engine;
-        distanceRef.current = distanceM;
         setCourseMeters(distanceM);
         setStatus('');
         const baseline = engine.getSnapshot().stepCount;
+        const run = createHallwayCalibration({
+          courseMeters: distanceM,
+          measure: (course, steps) => engine.calibrateStepLength(course, steps),
+          live,
+        });
+        const progress = () => stepsTowardCalibration(baseline, engine.getSnapshot().stepCount);
         walking = true;
         sessionRef.current = next;
         setSession(next);
@@ -115,32 +119,24 @@ export default function CalibrationScreen() {
 
         const tick = () => {
           if (!walking) return;
-          const progressed = noteSteps(
-            sessionRef.current,
-            stepsTowardCalibration(baseline, engine.getSnapshot().stepCount),
-          );
+          const progressed = run.poll(sessionRef.current, progress());
           if (!walking) return;
-          if (progressed.phase === 'done') {
-            halt();
-            const course = distanceRef.current;
-            const estimate =
-              course === null ? null : engine.calibrateStepLength(course, progressed.steps);
-            const saved = commitStepLength(estimate, live);
-            if (!saved) {
-              const idle = { phase: 'idle' as const, steps: 0 };
-              sessionRef.current = idle;
-              setSession(idle);
-              setStepLengthM(readStepLength()?.stepLengthM ?? null);
-              setStatus('That distance did not update step length.');
-              return;
-            }
-            sessionRef.current = progressed;
-            setSession(progressed);
-            setStepLengthM(saved.stepLengthM);
-            return;
-          }
           sessionRef.current = progressed;
           setSession(progressed);
+          if (progressed.steps >= CALIBRATION_STEPS) setStatus('');
+        };
+
+        endRef.current = () => {
+          if (!walking) return;
+          const result = run.end(sessionRef.current, progress());
+          if (result.session.phase !== 'walking') halt();
+          sessionRef.current = result.session;
+          setSession(result.session);
+          setStatus(result.status);
+          if (result.saved) setStepLengthM(result.saved.stepLengthM);
+          else if (result.session.phase === 'idle') {
+            setStepLengthM(readStepLength()?.stepLengthM ?? null);
+          }
         };
 
         tick();
@@ -152,6 +148,7 @@ export default function CalibrationScreen() {
         sessionRef.current = next;
         halt();
         setSession(next);
+        setStatus('');
       };
 
       return () => {
@@ -160,6 +157,7 @@ export default function CalibrationScreen() {
         sessionRef.current = next;
         halt();
         startRef.current = () => undefined;
+        endRef.current = () => undefined;
         cancelRef.current = () => undefined;
         setSession(next);
       };
@@ -192,7 +190,7 @@ export default function CalibrationScreen() {
           <StepRing
             total={CALIBRATION_STEPS}
             done={session.steps}
-            value={`${session.steps}/${CALIBRATION_STEPS}`}
+            value={`${session.steps}`}
             caption="steps"
           />
         )}
@@ -252,14 +250,16 @@ export default function CalibrationScreen() {
             <Glass style={styles.message}>
               <ThemedText type="title2">Keep walking straight</ThemedText>
               <ThemedText themeColor="textSecondary" style={styles.center}>
-                {remaining} more {remaining === 1 ? 'step' : 'steps'}
-                {courseMeters !== null ? ` down the ${courseMeters} m hallway` : ''}
+                {remaining > 0
+                  ? `${remaining} more ${remaining === 1 ? 'step' : 'steps'} before you can finish`
+                  : 'Mark the end when you reach it'}
+                {courseMeters !== null ? ` · ${courseMeters} m hallway` : ''}
               </ThemedText>
             </Glass>
             <View style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
               <ThemedText type="footnote" themeColor="textSecondary">
-                Walk at your normal pace with the phone held in front of you. Reckon stops at{' '}
-                {CALIBRATION_STEPS} steps and saves your step length.
+                Walk at your normal pace with the phone held in front of you. Mark the end of the
+                hallway when you get there. At least {CALIBRATION_STEPS} steps.
               </ThemedText>
             </View>
           </>
@@ -287,7 +287,14 @@ export default function CalibrationScreen() {
         <Button label="Start calibration" variant="primary" onPress={() => startRef.current()} />
       ) : null}
       {session.phase === 'walking' ? (
-        <Button label="Cancel" variant="glass" onPress={() => cancelRef.current()} />
+        <>
+          <Button
+            label="I'm at the end of the hallway"
+            variant="primary"
+            onPress={() => endRef.current()}
+          />
+          <Button label="Cancel" variant="glass" onPress={() => cancelRef.current()} />
+        </>
       ) : null}
     </Screen>
   );
@@ -296,7 +303,7 @@ export default function CalibrationScreen() {
 const HOW_IT_WORKS = [
   ['Find a straight hallway', 'Clear of furniture, at least 5 m long'],
   ['Measure and enter its length', 'A tape measure or floor tiles work'],
-  ['Walk 10 normal steps', 'Hold the phone in front of you'],
+  ['Walk it, then mark the end', `At least ${CALIBRATION_STEPS} steps at your normal pace`],
 ] as const;
 
 const styles = StyleSheet.create({
