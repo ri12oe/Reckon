@@ -8,16 +8,6 @@ import {
 import { mockEngine } from '@/engine/mock-engine';
 import type { SensorStartResult, StartSensorFeedOptions } from '@/engine/sensor-feed';
 
-/**
- * Process-wide live engine. `startSensors` / `stopSensors` subscribe it.
- * Until the first finite sample, `getSnapshot` is the static demo from
- * `mockEngine`, which stays exported. Tests build an isolated engine
- * with `createLiveEngine()`.
- *
- * A saved step length is applied once the database is open. Web opens
- * that database after the first render, so a later `getEngine` call
- * picks the length up.
- */
 let liveEngine: LiveFloorwalkerEngine | null = null;
 let bootedWithDatabase = false;
 
@@ -32,6 +22,7 @@ function bootConfig(): LiveEngineConfig {
     emptySnapshot: mockEngine.getSnapshot(),
     drift: { corridor: true },
     ...(stepLengthM !== undefined ? { stepLengthM } : {}),
+    readStepLengthM: storedStepLengthM,
   };
 }
 
