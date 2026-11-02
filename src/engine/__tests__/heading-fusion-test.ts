@@ -142,6 +142,55 @@ describe('fuseHeading', () => {
     });
   });
 
+  test('one in-range sample at 0 ms stays 0° gyro-only (before: latched 90°)', () => {
+    const fused = fuseHeading([{ t: 0, yawRate: 0 }], [{ t: 0, ...east() }]);
+
+    expect(fused).toHaveLength(1);
+    expect(fused[0]).toMatchObject({
+      t: 0,
+      heading: 0,
+      gyroOnly: true,
+      interference: false,
+      magneticHeading: 90,
+      magnitudeUt: 50,
+    });
+  });
+
+  test('an 80° sample at 0 ms then stable north stays 0° and trusts north at 420 ms (before: latched 80° and stayed gyro-only)', () => {
+    const times = clock(0, 2000);
+    const fused = fuseHeading(
+      gyroAt(times, 0),
+      magAt(times, (t) => (t === 0 ? field(80) : north())),
+    );
+
+    expect(at(fused, 0)).toMatchObject({
+      heading: 0,
+      magneticHeading: 80,
+      magnitudeUt: 50,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(at(fused, 400)).toMatchObject({
+      heading: 0,
+      magneticHeading: 0,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(at(fused, 420)).toMatchObject({
+      heading: 0,
+      magneticHeading: 0,
+      magnitudeUt: 50,
+      gyroOnly: false,
+      interference: false,
+    });
+    expect(at(fused, 2000)).toMatchObject({
+      heading: 0,
+      magneticHeading: 0,
+      gyroOnly: false,
+      interference: false,
+    });
+  });
+
   test('level cardinals: 51 samples at 50 Hz stay on 0, 90, 180, and 270', () => {
     const cases = [
       { heading: 0, field: north() },
