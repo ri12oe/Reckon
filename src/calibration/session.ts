@@ -1,4 +1,3 @@
-/** Steps in the one-time straight-line calibration walk. */
 export const CALIBRATION_STEPS = 10;
 
 export type CalibrationPhase = 'idle' | 'walking' | 'done';
@@ -47,10 +46,12 @@ export function parseCourseMeters(text: string): number | null {
 
 export function noteSteps(session: CalibrationSession, progress: number): CalibrationSession {
   if (session.phase !== 'walking') return session;
-  if (!Number.isFinite(progress) || progress < CALIBRATION_STEPS) {
-    const steps = Number.isFinite(progress) ? Math.max(0, Math.floor(progress)) : 0;
-    if (steps === session.steps) return session;
-    return { phase: 'walking', steps };
-  }
-  return { phase: 'done', steps: CALIBRATION_STEPS };
+  const steps = Number.isFinite(progress) ? Math.max(0, Math.floor(progress)) : 0;
+  if (steps === session.steps) return session;
+  return { phase: 'walking', steps };
+}
+
+export function endCalibration(session: CalibrationSession): CalibrationSession {
+  if (session.phase !== 'walking' || session.steps < CALIBRATION_STEPS) return session;
+  return { phase: 'done', steps: session.steps };
 }
