@@ -385,6 +385,50 @@ describe('sensor feed into the live engine', () => {
     expect(engine.getSnapshot().rawPath).toHaveLength(5);
   });
 
+  test('stop brakes yaw at the last sample time and a second stop does not repeat it', async () => {
+    const sensors = motionSensors();
+    const gyro: GyroSample[] = [];
+    const feed = await startSensorFeed(
+      {
+        pushAccel: () => undefined,
+        pushGyro: (sample) => gyro.push(sample),
+        pushMag: () => undefined,
+      },
+      { sensors },
+    );
+
+    sensors.Gyroscope.emit({ x: 0, y: 0, z: -1, timestamp: 1 });
+    sensors.Gyroscope.emit({ x: 0, y: 0, z: -1, timestamp: 1.02 });
+    feed.stop();
+    feed.stop();
+
+    expect(gyro).toEqual([
+      { t: 1000, yawRate: 1 },
+      { t: 1020, yawRate: 1 },
+      { t: 1020, brake: true },
+    ]);
+  });
+
+  test('stopSensors holds 90° across a 1.5 s pause instead of adding 135°', async () => {
+    const first = motionSensors();
+    const engine = createLiveEngine();
+    await engine.startSensors({ sensors: first });
+
+    for (let step = 0; step <= 50; step += 1) {
+      first.Gyroscope.emit({ x: 0, y: 0, z: -Math.PI / 2, timestamp: step * 0.02 });
+    }
+    expect(engine.getSnapshot().heading).toBeCloseTo(90, 6);
+
+    engine.stopSensors();
+
+    const resumed = motionSensors();
+    await engine.startSensors({ sensors: resumed });
+    resumed.Gyroscope.emit({ x: 0, y: 0, z: 0, timestamp: 2.5 });
+
+    expect(engine.getSnapshot().heading).toBeCloseTo(90, 6);
+    engine.stopSensors();
+  });
+
   test('a device gyro of −π/2 rad/s for 1 s reaches the engine as heading 90°', async () => {
     const sensors = motionSensors();
     const engine = createLiveEngine();
