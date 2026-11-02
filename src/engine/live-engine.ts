@@ -788,6 +788,7 @@ function cloneSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
   };
   if (snapshot.gyroOnly !== undefined) copy.gyroOnly = snapshot.gyroOnly;
   if (snapshot.sensorStartFailed !== undefined) copy.sensorStartFailed = snapshot.sensorStartFailed;
+  if (snapshot.isCannedDemo) copy.isCannedDemo = true;
   return copy;
 }
 
