@@ -1,5 +1,14 @@
-import { createLiveEngine, mockEngine, type EngineSnapshot } from '@/engine';
-import { commitWalkPins, dropWalkPin, readWalk, type HeldPin } from '@/walk/pin-drop';
+import { createLiveEngine, mockEngine, type EngineSnapshot, type LandmarkPin } from '@/engine';
+import {
+  commitWalkPins,
+  dropLandmark,
+  dropWalkPin,
+  emptyLandmark,
+  newLandmark,
+  readWalk,
+  type HeldPin,
+  type OpenLandmark,
+} from '@/walk/pin-drop';
 
 const pin: HeldPin = { id: 'pin-1', label: 'pin 1' };
 
@@ -142,5 +151,103 @@ describe('walk pin drop', () => {
     expect(settled.commit).toEqual([]);
     expect(settled.held).toEqual([pin]);
     expect(settled.shown.pins).toEqual([]);
+  });
+});
+
+function liveDrop(
+  open: OpenLandmark,
+  engine: ReturnType<typeof createLiveEngine>,
+  held: readonly HeldPin[],
+) {
+  const demo = mockEngine.getSnapshot();
+  return dropLandmark(open, engine.getSnapshot(), demo, false, held);
+}
+
+describe('drop landmark', () => {
+  test('the first drop mints a landmark and the next drop tags that same id', () => {
+    const demo = mockEngine.getSnapshot();
+    const engine = createLiveEngine({ emptySnapshot: demo });
+    const seen: LandmarkPin[] = [];
+    const record = {
+      tagLandmark(tag: LandmarkPin) {
+        seen.push(tag);
+        engine.tagLandmark(tag);
+      },
+    };
+
+    engine.pushStep({ t: 1000, heading: 0 });
+    const first = liveDrop(emptyLandmark(), engine, []);
+    expect(first.placed).toBe(true);
+    expect(first.read.commit).toEqual([{ id: 'pin-1', label: 'Pin 1' }]);
+    commitWalkPins(record, first.read);
+
+    engine.pushStep({ t: 1500, heading: 90 });
+    const second = liveDrop(first.open, engine, first.read.held);
+    expect(second.read.commit).toEqual([{ id: 'pin-1', label: 'Pin 1' }]);
+    expect(second.open).toEqual(first.open);
+    commitWalkPins(record, second.read);
+
+    expect(seen).toEqual([
+      { id: 'pin-1', label: 'Pin 1' },
+      { id: 'pin-1', label: 'Pin 1' },
+    ]);
+    expect(engine.getSnapshot().pins.filter((item) => item.id === 'pin-1')).toHaveLength(1);
+  });
+
+  test('new pin mints the next landmark on the following drop', () => {
+    const demo = mockEngine.getSnapshot();
+    const engine = createLiveEngine({ emptySnapshot: demo });
+    const seen: string[] = [];
+    const record = {
+      tagLandmark(tag: LandmarkPin) {
+        seen.push(tag.id);
+        engine.tagLandmark(tag);
+      },
+    };
+
+    engine.pushStep({ t: 1000, heading: 0 });
+    const first = liveDrop(emptyLandmark(), engine, []);
+    commitWalkPins(record, first.read);
+
+    engine.pushStep({ t: 1500, heading: 90 });
+    const again = liveDrop(newLandmark(newLandmark(first.open)), engine, []);
+    expect(again.read.commit).toEqual([{ id: 'pin-2', label: 'Pin 2' }]);
+    commitWalkPins(record, again.read);
+
+    engine.pushStep({ t: 2000, heading: 180 });
+    const third = liveDrop(again.open, engine, again.read.held);
+    expect(third.read.commit).toEqual([{ id: 'pin-2', label: 'Pin 2' }]);
+    commitWalkPins(record, third.read);
+
+    expect(seen).toEqual(['pin-1', 'pin-2', 'pin-2']);
+  });
+
+  test('a second drop of the same landmark on the demo stays held once', () => {
+    const demo = mockEngine.getSnapshot();
+    const engine = createLiveEngine({ emptySnapshot: demo });
+    const first = dropLandmark(emptyLandmark(), engine.getSnapshot(), demo, false, []);
+    expect(first.read.commit).toEqual([]);
+    expect(first.read.held).toEqual([{ id: 'pin-1', label: 'Pin 1' }]);
+
+    const second = dropLandmark(first.open, engine.getSnapshot(), demo, false, first.read.held);
+    expect(second.placed).toBe(false);
+    expect(second.read.commit).toEqual([]);
+    expect(second.read.held).toEqual([{ id: 'pin-1', label: 'Pin 1' }]);
+    expect(second.open).toEqual(first.open);
+    expect(second.read.shown.pins.filter((item) => item.id === 'pin-1')).toHaveLength(1);
+  });
+
+  test('a recalled floor does not mint a landmark or commit a pin', () => {
+    const demo = mockEngine.getSnapshot();
+    const dropped = dropLandmark(emptyLandmark(), demo, demo, true, []);
+    expect(dropped.placed).toBe(false);
+    expect(dropped.read.commit).toEqual([]);
+    expect(dropped.read.held).toEqual([]);
+    expect(dropped.open).toEqual(emptyLandmark());
+
+    const engine = createLiveEngine({ emptySnapshot: demo });
+    engine.pushStep({ t: 1000, heading: 0 });
+    const next = liveDrop(dropped.open, engine, []);
+    expect(next.read.commit).toEqual([{ id: 'pin-1', label: 'Pin 1' }]);
   });
 });
