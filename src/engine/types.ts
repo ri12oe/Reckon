@@ -43,6 +43,12 @@ export type EngineSnapshot = {
    */
   gyroOnly?: boolean;
   sensorStartFailed?: SensorStartFault;
+  /**
+   * The static demo picture, not a walk. `snapshotForSave` replaces it
+   * with an empty recording. A screen that summarizes a save must refuse
+   * this snapshot and show that recording instead.
+   */
+  isCannedDemo?: true;
 };
 
 export type FloorwalkerEngine = {

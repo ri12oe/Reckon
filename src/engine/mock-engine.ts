@@ -25,6 +25,7 @@ const snapshot: EngineSnapshot = {
     { id: 'door', x: 4.5, y: 1.5, label: 'door' },
     { id: 'desk', x: 4.5, y: 4.5, label: 'desk' },
   ],
+  isCannedDemo: true,
 };
 
 export const mockEngine: FloorwalkerEngine = {
@@ -44,7 +45,7 @@ export function emptyRecording(): EngineSnapshot {
 }
 
 export function isCannedDemo(snapshot: EngineSnapshot): boolean {
-  return sameSnapshot(snapshot, mockEngine.getSnapshot());
+  return snapshot.isCannedDemo === true || sameSnapshot(snapshot, mockEngine.getSnapshot());
 }
 
 function sameSnapshot(a: EngineSnapshot, b: EngineSnapshot): boolean {
