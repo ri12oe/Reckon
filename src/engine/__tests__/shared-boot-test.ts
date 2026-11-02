@@ -27,7 +27,9 @@ describe('shared engine boot', () => {
     expect(snapshot.heading).toBe(10);
     expectPoint(snapshot.rawPath[2]!, 0.347296355334, 1.969615506024, 1000);
     expectPoint(snapshot.rawPath[4]!, 0.694592710668, 3.939231012049, 2000);
-    expect(snapshot.correctedPath[2]).toEqual({ x: 0, y: 2, t: 1000 });
+    expect(snapshot.correctedPath[2]!.x).toBe(0);
+    expect(snapshot.correctedPath[2]!.y).toBeCloseTo(2, 9);
+    expect(snapshot.correctedPath[2]!.t).toBe(1000);
     expect(snapshot.correctedPath[4]!.x).toBe(0);
     expect(snapshot.correctedPath[4]!.y).toBeCloseTo(4, 9);
     expect(snapshot.correctedPath[4]!.t).toBe(2000);

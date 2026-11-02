@@ -30,6 +30,7 @@ function bootConfig(): LiveEngineConfig {
   const stepLengthM = storedStepLengthM();
   return {
     emptySnapshot: mockEngine.getSnapshot(),
+    drift: { corridor: true },
     ...(stepLengthM !== undefined ? { stepLengthM } : {}),
   };
 }
