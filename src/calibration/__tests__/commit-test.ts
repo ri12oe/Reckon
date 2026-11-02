@@ -81,8 +81,11 @@ describe('commitStepLength', () => {
     expect(readStepLength()).toEqual(estimate);
     expect(live.getStepLength()).toBe(0.625);
     expect(live.getSnapshot().stepCount).toBe(1);
-    expect(live.getSnapshot().rawPath[1]!.x).toBe(0.625);
+    expect(live.getSnapshot().rawPath[1]!.x).toBe(0.75);
     expect(live.getSnapshot().rawPath).toHaveLength(2);
+    east(live, 200);
+    expect(live.getSnapshot().rawPath[1]!.x).toBe(0.75);
+    expect(live.getSnapshot().rawPath[2]!.x).toBe(1.375);
 
     jest.isolateModules(() => {
       // isolateModules only accepts a synchronous factory.

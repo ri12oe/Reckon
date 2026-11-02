@@ -58,8 +58,10 @@ import { emptyRecording, isCannedDemo } from '@/engine/mock-engine';
 import {
   DEFAULT_STEP_LENGTH_M,
   integratePath,
+  stepLengthsFor,
   type HeadingSample,
   type PathStep,
+  type RecordedStepLength,
 } from '@/engine/path-integration';
 import {
   startSensorFeed,
@@ -135,12 +137,17 @@ export type LiveFloorwalkerEngine = FloorwalkerEngine & {
   /** A finite timestamp selects explicit steps over accelerometer peaks. */
   pushStep(step: PathStep): void;
   pushHeading(sample: HeadingSample): void;
-  /** Ignored when `stepLengthM` is not finite. */
+  /**
+   * Meters per step for steps taken after this call.
+   * Steps already taken stay where they are. Ignored when `stepLengthM` is not finite.
+   */
   setStepLength(stepLengthM: number): void;
   /**
    * Mean step length for a measured course.
    * `stepCount` defaults to the steps the next snapshot would integrate.
    * A course that cannot produce a length leaves the current length in place.
+   * An accepted length replaces the length of steps already taken and
+   * applies to steps after them.
    */
   calibrateStepLength(distanceM: number, stepCount?: number): StepLengthEstimate | null;
   /** Updates only the fields present on `options`. */
@@ -195,6 +202,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   const explicitSteps: PathStep[] = [];
   const headingSamples: HeadingSample[] = [];
   let stepLengthM = initialLength;
+  let takenLengths: readonly RecordedStepLength[] = [];
   let drift = cloneDrift(initialDrift);
   let cached: EngineSnapshot | null = null;
   let recalled: EngineSnapshot | null = null;
@@ -244,10 +252,22 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     return { kind: 'constant', heading: resolvedInitialHeading(headingFusionConfig) };
   }
 
+  function withTakenLengths(steps: readonly PathStep[]): PathStep[] {
+    const finite = finiteSteps(steps);
+    takenLengths = stepLengthsFor(finite, takenLengths, stepLengthM);
+    let index = 0;
+    return steps.map((step) => {
+      if (!Number.isFinite(step.t)) return step;
+      const stepLength = takenLengths[index]!.stepLength;
+      index += 1;
+      return { ...step, stepLength };
+    });
+  }
+
   function compute(): EngineSnapshot {
     maintainBounds();
     const course = headingCourse();
-    const steps = currentSteps();
+    const steps = withTakenLengths(currentSteps());
     const rawPath = integratePath(
       steps,
       course.kind === 'constant' ? course.heading : course.samples,
@@ -390,15 +410,22 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       touch();
     },
     setStepLength(next) {
-      if (!Number.isFinite(next)) return;
+      if (!Number.isFinite(next) || next === stepLengthM) return;
+      const steps = currentSteps();
+      takenLengths = stepLengthsFor(finiteSteps(steps), takenLengths, stepLengthM);
       stepLengthM = next;
       touch();
     },
     calibrateStepLength(distanceM, stepCount) {
-      const count = stepCount === undefined ? countCalibrationSteps(currentSteps()) : stepCount;
+      const steps = currentSteps();
+      const count = stepCount === undefined ? countCalibrationSteps(steps) : stepCount;
       const estimate = estimateStepLength({ distanceM, stepCount: count });
       if (!estimate) return null;
       stepLengthM = estimate.stepLengthM;
+      takenLengths = finiteSteps(steps).map((step) => ({
+        t: step.t,
+        stepLength: estimate.stepLengthM,
+      }));
       touch();
       return estimate;
     },
@@ -457,6 +484,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       explicitSteps.length = 0;
       headingSamples.length = 0;
       stepLengthM = initialLength;
+      takenLengths = [];
       drift = cloneDrift(initialDrift);
       accepted = false;
       recalled = null;
@@ -690,6 +718,14 @@ function accelAccepted(sample: StepSample): boolean {
     return Number.isFinite(sample.x) && Number.isFinite(sample.y) && Number.isFinite(sample.z);
   }
   return Number.isFinite(sample.magnitude);
+}
+
+function finiteSteps(steps: readonly PathStep[]): PathStep[] {
+  const finite: PathStep[] = [];
+  for (const step of steps) {
+    if (Number.isFinite(step.t)) finite.push(step);
+  }
+  return finite;
 }
 
 function copyPathStep(step: PathStep): PathStep {

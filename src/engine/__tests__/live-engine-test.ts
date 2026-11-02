@@ -287,6 +287,44 @@ describe('sensor walk', () => {
     expect(snapshot.correctedPath[4]).toEqual({ x: 0, y: 4, t: 2000 });
     expect(snapshot.correctedPath[8]).toEqual({ x: 4, y: 4, t: 5000 });
   });
+
+  test('detected steps stay at 0.75 m after setStepLength(0.5); the next two peaks end at x = 4', () => {
+    const series = verticalWalk([400, 800, 1200, 1600, 2400, 2800]);
+    const engine = createLiveEngine();
+    for (const sample of series) {
+      if (sample.t <= 2100) engine.pushAccel(sample);
+    }
+    engine.pushMag({ t: 0, ...eastField() });
+
+    const before = engine.getSnapshot();
+    expect(before.stepCount).toBe(4);
+    expect(before.rawPath[0]).toEqual({ x: 0, y: 0, t: 0 });
+    for (let k = 1; k <= 4; k++) {
+      expect(before.rawPath[k]!.x).toBe(0.75 * k);
+      expect(before.rawPath[k]!.y).toBeCloseTo(0, 12);
+      expect(before.rawPath[k]!.t).toBe(400 * k);
+    }
+    expect(before.rawPath[4]!.x).toBe(3);
+
+    engine.setStepLength(0.5);
+    const frozen = engine.getSnapshot();
+    expect(engine.getStepLength()).toBe(0.5);
+    expect(frozen.stepCount).toBe(4);
+    expect(frozen.rawPath).toEqual(before.rawPath);
+
+    for (const sample of series) {
+      if (sample.t > 2100) engine.pushAccel(sample);
+    }
+    const after = engine.getSnapshot();
+    expect(after.stepCount).toBe(6);
+    expect(after.rawPath.slice(0, 5)).toEqual(before.rawPath);
+    expect(after.rawPath[5]!.x).toBe(3.5);
+    expect(after.rawPath[5]!.y).toBeCloseTo(0, 12);
+    expect(after.rawPath[5]!.t).toBe(2400);
+    expect(after.rawPath[6]!.x).toBe(4);
+    expect(after.rawPath[6]!.y).toBeCloseTo(0, 12);
+    expect(after.rawPath[6]!.t).toBe(2800);
+  });
 });
 
 describe('precomputed steps and headings', () => {
@@ -397,6 +435,106 @@ describe('precomputed steps and headings', () => {
     engine.pushStep({ t: 1000, heading: 0 });
     expect(engine.getStepLength()).toBe(0.5);
     expect(engine.getSnapshot().rawPath[1]).toEqual({ x: 0, y: 0.5, t: 1000 });
+  });
+
+  test('4 steps at 1 m end at (4, 0); setStepLength(0.5) leaves them; the next steps add 0.5 m', () => {
+    const engine = createLiveEngine({ stepLengthM: 1 });
+    for (const t of [100, 200, 300, 400]) engine.pushStep({ t, heading: 90 });
+
+    const before = engine.getSnapshot();
+    expect(before.rawPath.map((point) => point.x)).toEqual([0, 1, 2, 3, 4]);
+    expect(before.rawPath.map((point) => point.t)).toEqual([0, 100, 200, 300, 400]);
+    for (const point of before.rawPath) expect(point.y).toBeCloseTo(0, 12);
+
+    engine.setStepLength(Number.NaN);
+    expect(engine.getStepLength()).toBe(1);
+    expect(engine.getSnapshot().rawPath).toEqual(before.rawPath);
+
+    engine.setStepLength(0.5);
+    expect(engine.getStepLength()).toBe(0.5);
+    expect(engine.getSnapshot().rawPath).toEqual(before.rawPath);
+    expect(engine.getSnapshot().correctedPath).toEqual(before.correctedPath);
+
+    engine.pushStep({ t: 500, heading: 90 });
+    engine.pushStep({ t: 600, heading: 0 });
+    const after = engine.getSnapshot();
+    expect(after.rawPath.slice(0, 5)).toEqual(before.rawPath);
+    expect(after.rawPath[5]!.x).toBe(4.5);
+    expect(after.rawPath[5]!.y).toBeCloseTo(0, 12);
+    expect(after.rawPath[5]!.t).toBe(500);
+    expect(after.rawPath[6]!.x).toBe(4.5);
+    expect(after.rawPath[6]!.y).toBeCloseTo(0.5, 12);
+    expect(after.rawPath[6]!.t).toBe(600);
+
+    engine.setStepLength(2);
+    expect(engine.getSnapshot().rawPath).toEqual(after.rawPath);
+    engine.pushStep({ t: 700, heading: 90 });
+    const third = engine.getSnapshot();
+    expect(third.rawPath.slice(0, 7)).toEqual(after.rawPath);
+    expect(third.rawPath[7]!.x).toBe(6.5);
+    expect(third.rawPath[7]!.y).toBeCloseTo(0.5, 12);
+    expect(third.rawPath[7]!.t).toBe(700);
+  });
+
+  test('a step taken after setStepLength uses 0.5 m even when its timestamp is earlier', () => {
+    const engine = createLiveEngine({ stepLengthM: 1 });
+    engine.pushStep({ t: 100, heading: 90 });
+    engine.pushStep({ t: 200, heading: 90 });
+    engine.setStepLength(0.5);
+    engine.pushStep({ t: 50, heading: 90 });
+
+    const path = engine.getSnapshot().rawPath;
+    expect(path.map((point) => point.t)).toEqual([0, 50, 100, 200]);
+    expect(path.map((point) => point.x)).toEqual([0, 0.5, 1.5, 2.5]);
+    for (const point of path) expect(point.y).toBeCloseTo(0, 12);
+  });
+
+  test('setStepLength before any step is the length from the first step; reset restores 0.75 m', () => {
+    const engine = createLiveEngine();
+    engine.setStepLength(0.5);
+    engine.pushStep({ t: 100, heading: 0 });
+    engine.pushStep({ t: 200, heading: 0 });
+    engine.pushStep({ t: 300, heading: 0 });
+    expect(engine.getStepLength()).toBe(0.5);
+    expect(engine.getSnapshot().rawPath).toEqual([
+      { x: 0, y: 0, t: 0 },
+      { x: 0, y: 0.5, t: 100 },
+      { x: 0, y: 1, t: 200 },
+      { x: 0, y: 1.5, t: 300 },
+    ]);
+
+    engine.reset();
+    expect(engine.getStepLength()).toBe(0.75);
+    engine.pushStep({ t: 100, heading: 0 });
+    expect(engine.getSnapshot().rawPath[1]).toEqual({ x: 0, y: 0.75, t: 100 });
+  });
+
+  test('calibrateStepLength rescales the measured course; a later setStepLength does not', () => {
+    const engine = createLiveEngine({ stepLengthM: 1 });
+    for (const t of [100, 200, 300, 400]) engine.pushStep({ t, heading: 90 });
+    expect(engine.getSnapshot().rawPath[4]!.x).toBe(4);
+    expect(engine.getSnapshot().rawPath[4]!.t).toBe(400);
+
+    expect(engine.calibrateStepLength(8)).toEqual({
+      stepLengthM: 2,
+      distanceM: 8,
+      stepCount: 4,
+    });
+    const course = engine.getSnapshot().rawPath;
+    expect(course.map((point) => point.x)).toEqual([0, 2, 4, 6, 8]);
+    expect(course.map((point) => point.t)).toEqual([0, 100, 200, 300, 400]);
+
+    engine.setStepLength(0.5);
+    expect(engine.getStepLength()).toBe(0.5);
+    expect(engine.getSnapshot().rawPath).toEqual(course);
+    engine.pushStep({ t: 500, heading: 90 });
+    const extended = engine.getSnapshot().rawPath;
+    expect(extended[4]!.x).toBe(8);
+    expect(extended[4]!.y).toBeCloseTo(0, 12);
+    expect(extended[4]!.t).toBe(400);
+    expect(extended[5]!.x).toBe(8.5);
+    expect(extended[5]!.y).toBeCloseTo(0, 12);
+    expect(extended[5]!.t).toBe(500);
   });
 });
 
