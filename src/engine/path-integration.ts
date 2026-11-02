@@ -31,7 +31,39 @@ export type HeadingSample = {
   t: number;
   /** Degrees clockwise from north. */
   heading: number;
+  gyroOnly?: boolean;
 };
+
+/** Degrees added to headings strictly before `t`. */
+export type AcquireBias = {
+  t: number;
+  delta: number;
+};
+
+/**
+ * The jump at the first gyroscope sample that is followed by a trusted fix.
+ * Later holds do not count. A course that never becomes trusted returns null.
+ */
+export function firstAcquireBias(samples: readonly HeadingSample[]): AcquireBias | null {
+  let previous: HeadingSample | null = null;
+  for (const sample of samples) {
+    if (!Number.isFinite(sample.t) || !Number.isFinite(sample.heading)) continue;
+    if (previous && isFirstTrustedFix(previous, sample)) {
+      return { t: sample.t, delta: wrap180(sample.heading - previous.heading) };
+    }
+    previous = sample;
+  }
+  return null;
+}
+
+export function headingWithAcquireBias(
+  heading: number,
+  t: number,
+  bias: AcquireBias | null,
+): number {
+  if (!bias || !(t < bias.t) || !Number.isFinite(heading)) return heading;
+  return wrap360(heading + bias.delta);
+}
 
 /**
  * A step time, optionally already paired with a heading.
@@ -126,19 +158,31 @@ function resolveHeading(heading: number | readonly HeadingSample[]): Course {
   const samples: HeadingSample[] = [];
   for (const sample of heading) {
     if (!Number.isFinite(sample.t) || !Number.isFinite(sample.heading)) continue;
-    samples.push({ t: sample.t, heading: sample.heading });
+    const next: HeadingSample = { t: sample.t, heading: sample.heading };
+    if (sample.gyroOnly !== undefined) next.gyroOnly = sample.gyroOnly;
+    samples.push(next);
   }
   samples.sort((a, b) => a.t - b.t);
 
   const collapsed: HeadingSample[] = [];
   for (const sample of samples) {
     const previous = collapsed[collapsed.length - 1];
-    if (previous && previous.t === sample.t) previous.heading = sample.heading;
-    else collapsed.push(sample);
+    if (previous && previous.t === sample.t) {
+      previous.heading = sample.heading;
+      if (sample.gyroOnly === undefined) delete previous.gyroOnly;
+      else previous.gyroOnly = sample.gyroOnly;
+    } else collapsed.push(sample);
   }
 
   if (collapsed.length === 0) return { kind: 'constant', heading: 0 };
-  return { kind: 'series', samples: collapsed };
+  const bias = firstAcquireBias(collapsed);
+  return {
+    kind: 'series',
+    samples: collapsed.map((sample) => ({
+      t: sample.t,
+      heading: headingWithAcquireBias(sample.heading, sample.t, bias),
+    })),
+  };
 }
 
 function orderSteps(steps: readonly PathStep[]): PathStep[] {
@@ -219,4 +263,18 @@ function resolveConfig(config?: Partial<PathIntegrationConfig>): PathIntegration
 
 function finiteOr(value: number | undefined, fallback: number): number {
   return value === undefined || !Number.isFinite(value) ? fallback : value;
+}
+
+function isFirstTrustedFix(previous: HeadingSample, sample: HeadingSample): boolean {
+  return previous.gyroOnly === true && sample.gyroOnly === false;
+}
+
+function wrap360(deg: number): number {
+  const wrapped = ((deg % 360) + 360) % 360;
+  return wrapped === 0 ? 0 : wrapped;
+}
+
+function wrap180(deg: number): number {
+  const wrapped = wrap360(deg);
+  return wrapped > 180 ? wrapped - 360 : wrapped;
 }

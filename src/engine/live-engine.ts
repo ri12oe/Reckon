@@ -56,8 +56,11 @@ import {
 import { emptyRecording, isCannedDemo } from '@/engine/mock-engine';
 import {
   DEFAULT_STEP_LENGTH_M,
+  firstAcquireBias,
+  headingWithAcquireBias,
   integratePath,
   stepLengthsFor,
+  type AcquireBias,
   type HeadingSample,
   type PathStep,
   type RecordedStepLength,
@@ -201,9 +204,10 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   const stepsAcc = createStepAccumulator(stepDetectorConfig);
   const fusion = createHeadingFusion(headingFusionConfig);
   const fusedHeadings: HeadingSample[] = [];
-  /** Detected steps whose heading is finished. Parallel to the committed prefix. */
-  const baked: PathStep[] = [];
+  const gyroHeld: PathStep[] = [];
   const explicitSteps: PathStep[] = [];
+  let gyroHeadingByStep = new WeakMap<PathStep, number>();
+  let acquireBias: AcquireBias | null = null;
   const headingSamples: HeadingSample[] = [];
   let stepLengthM = initialLength;
   let takenLengths: readonly RecordedStepLength[] = [];
@@ -222,16 +226,33 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     cached = null;
   };
 
+  function courseHeading(heading: number, t: number): number {
+    return headingWithAcquireBias(heading, t, acquireBias);
+  }
+
   function currentSteps(): PathStep[] {
     if (explicitSteps.some((step) => Number.isFinite(step.t))) {
-      return explicitSteps.map(copyPathStep);
+      return explicitSteps.map((step) => {
+        const copy = copyPathStep(step);
+        if (copy.heading !== undefined) return copy;
+        const provisional = gyroHeadingByStep.get(step);
+        if (provisional === undefined) return copy;
+        return { t: step.t, heading: courseHeading(provisional, step.t) };
+      });
     }
     const detected = stepsAcc.steps();
     examined += stepsAcc.takeExamined();
     if (!stepsAcc.prefixStable()) return detected.map((step) => ({ t: step.t }));
     return detected.map((step, index) => {
-      const settled = baked[index];
-      if (settled && settled.t === step.t) return { t: step.t, heading: settled.heading };
+      const settled = gyroHeld[index];
+      if (
+        settled &&
+        settled.t === step.t &&
+        settled.heading !== undefined &&
+        Number.isFinite(settled.heading)
+      ) {
+        return { t: step.t, heading: courseHeading(settled.heading, step.t) };
+      }
       return { t: step.t };
     });
   }
@@ -239,11 +260,16 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
   function headingCourse(): Course {
     const replay = fusion.replayPending();
     examined += replay.processed;
+    const merged = mergedHeadings(replay.headings);
+    latchFirstAcquire(merged);
     const latest = replay.headings[replay.headings.length - 1] ?? fusion.latestSettled();
     if (latest) {
       return {
         kind: 'fused',
-        samples: mergedHeadings(replay.headings),
+        samples: merged.map((sample) => ({
+          t: sample.t,
+          heading: courseHeading(sample.heading, sample.t),
+        })),
         heading: latest.heading,
         gyroOnly: latest.gyroOnly,
       };
@@ -294,20 +320,42 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     return snapshot;
   }
 
+  function latchFirstAcquire(samples: readonly HeadingSample[]): void {
+    if (acquireBias) return;
+    const bias = firstAcquireBias(samples);
+    if (bias) acquireBias = bias;
+  }
+
   function absorbHeadings(headings: readonly FusedHeading[]): void {
     for (const heading of headings) {
       const previous = fusedHeadings[fusedHeadings.length - 1];
-      if (previous && previous.t === heading.t) previous.heading = heading.heading;
-      else fusedHeadings.push({ t: heading.t, heading: heading.heading });
+      if (previous && previous.t === heading.t) {
+        previous.heading = heading.heading;
+        previous.gyroOnly = heading.gyroOnly;
+      } else {
+        fusedHeadings.push({
+          t: heading.t,
+          heading: heading.heading,
+          gyroOnly: heading.gyroOnly,
+        });
+      }
     }
   }
 
   function mergedHeadings(replay: readonly FusedHeading[]): HeadingSample[] {
-    const samples = fusedHeadings.map(copyHeading);
+    const samples = fusedHeadings.map(copyStoredHeading);
     for (const heading of replay) {
       const previous = samples[samples.length - 1];
-      if (previous && previous.t === heading.t) previous.heading = heading.heading;
-      else samples.push({ t: heading.t, heading: heading.heading });
+      if (previous && previous.t === heading.t) {
+        previous.heading = heading.heading;
+        previous.gyroOnly = heading.gyroOnly;
+      } else {
+        samples.push({
+          t: heading.t,
+          heading: heading.heading,
+          gyroOnly: heading.gyroOnly,
+        });
+      }
     }
     return samples;
   }
@@ -318,22 +366,22 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
 
   function alignBaked(collapseBefore: number): void {
     if (!stepsAcc.prefixStable()) {
-      baked.length = 0;
+      gyroHeld.length = 0;
       return;
     }
     const committed = stepsAcc.committed();
     examined += stepsAcc.takeExamined();
-    if (baked.length > committed.length) baked.length = committed.length;
-    for (let index = 0; index < baked.length; index++) {
-      if (baked[index]!.t !== committed[index]!.t) {
-        baked.length = index;
+    if (gyroHeld.length > committed.length) gyroHeld.length = committed.length;
+    for (let index = 0; index < gyroHeld.length; index++) {
+      if (gyroHeld[index]!.t !== committed[index]!.t) {
+        gyroHeld.length = index;
         break;
       }
     }
-    while (baked.length < committed.length) {
-      const step = committed[baked.length]!;
+    while (gyroHeld.length < committed.length) {
+      const step = committed[gyroHeld.length]!;
       if (!(step.t < collapseBefore)) break;
-      baked.push({ t: step.t, heading: holdHeading(fusedHeadings, step.t) });
+      gyroHeld.push({ t: step.t, heading: holdHeading(fusedHeadings, step.t) });
     }
   }
 
@@ -342,7 +390,8 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     for (const step of explicitSteps) {
       if (step.heading !== undefined && Number.isFinite(step.heading)) continue;
       if (!(step.t < collapseBefore)) continue;
-      step.heading = holdHeading(fusedHeadings, step.t);
+      if (gyroHeadingByStep.has(step)) continue;
+      gyroHeadingByStep.set(step, holdHeading(fusedHeadings, step.t));
     }
   }
 
@@ -357,7 +406,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
 
   function maintainBounds(): void {
     if (!fusionActive()) {
-      if (!stepsAcc.prefixStable()) baked.length = 0;
+      if (!stepsAcc.prefixStable()) gyroHeld.length = 0;
       return;
     }
     const oldestPending = fusion.oldestPendingT();
@@ -365,6 +414,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     let collapseBefore = oldestPending ?? Number.POSITIVE_INFINITY;
     if (horizon !== null && horizon < collapseBefore) collapseBefore = horizon;
 
+    latchFirstAcquire(fusedHeadings);
     alignBaked(collapseBefore);
     bakeExplicit(collapseBefore);
     if (stepsAcc.prefixStable()) collapseHeadings(collapseBefore);
@@ -489,8 +539,10 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       stepsAcc.reset();
       fusion.reset();
       fusedHeadings.length = 0;
-      baked.length = 0;
+      gyroHeld.length = 0;
       explicitSteps.length = 0;
+      gyroHeadingByStep = new WeakMap();
+      acquireBias = null;
       headingSamples.length = 0;
       const read = config?.readStepLengthM?.();
       stepLengthM = read !== undefined && Number.isFinite(read) ? read : initialLength;
@@ -746,6 +798,12 @@ function copyPathStep(step: PathStep): PathStep {
 
 function copyHeading(sample: HeadingSample): HeadingSample {
   return { t: sample.t, heading: sample.heading };
+}
+
+function copyStoredHeading(sample: HeadingSample): HeadingSample {
+  const copy = copyHeading(sample);
+  if (sample.gyroOnly !== undefined) copy.gyroOnly = sample.gyroOnly;
+  return copy;
 }
 
 function gyroAccepted(sample: GyroSample): boolean {
