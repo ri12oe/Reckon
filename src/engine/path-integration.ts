@@ -1,7 +1,7 @@
 /**
  * Dead-reckoning path integration.
  *
- * Each step moves the walker by a fixed length. x is meters east, y is
+ * Each step moves the walker by its length. x is meters east, y is
  * meters north, and heading is degrees clockwise from north — the same
  * convention as `PathPoint` and `EngineSnapshot.heading`:
  *
@@ -16,10 +16,6 @@
  * Otherwise it is the constant passed in, or the latest heading sample at
  * or before the step (zero-order hold). A sample that is only in the
  * future is not used. Until the first sample, the heading is 0° (north).
- *
- * `stepLength` is meters per step and is constant for the call. This
- * module does not estimate it. `estimateStepLength` does, from a
- * known-distance calibration walk.
  *
  * Not in this module: step-length calibration, corridor snap, loop
  * closure, landmarks, or any other drift correction.
@@ -46,6 +42,15 @@ export type PathStep = {
   t: number;
   /** Degrees clockwise from north. Overrides the heading argument when finite. */
   heading?: number;
+  /** Meters for this step. Overrides the config length when finite. */
+  stepLength?: number;
+};
+
+export type RecordedStepLength = {
+  /** Milliseconds. The step this length belongs to. */
+  t: number;
+  /** Meters. */
+  stepLength: number;
 };
 
 export type PathIntegrationConfig = {
@@ -99,7 +104,10 @@ export function integratePath(
   const path: PathPoint[] = [{ x, y, t: resolved.originT }];
 
   for (const step of ordered) {
-    const delta = stepOffset(headingForStep(step, course), resolved.stepLength);
+    const delta = stepOffset(
+      headingForStep(step, course),
+      lengthForStep(step, resolved.stepLength),
+    );
     x += delta.x;
     y += delta.y;
     path.push({ x, y, t: step.t });
@@ -166,6 +174,35 @@ function holdHeading(samples: readonly HeadingSample[], t: number): number {
     }
   }
   return heading;
+}
+
+/**
+ * Length of each step in `steps`, in that same order.
+ *
+ * A prefix of `previous` whose timestamps still match keeps those lengths.
+ * Every step after that prefix uses `openLength`.
+ */
+export function stepLengthsFor(
+  steps: readonly { t: number }[],
+  previous: readonly RecordedStepLength[],
+  openLength: number,
+): readonly RecordedStepLength[] {
+  let prefix = 0;
+  const limit = Math.min(steps.length, previous.length);
+  while (prefix < limit && previous[prefix]!.t === steps[prefix]!.t) prefix += 1;
+  if (prefix === steps.length && previous.length === steps.length) return previous;
+
+  const next: RecordedStepLength[] = [];
+  for (let index = 0; index < prefix; index++) next.push(previous[index]!);
+  for (let index = prefix; index < steps.length; index++) {
+    next.push({ t: steps[index]!.t, stepLength: openLength });
+  }
+  return next;
+}
+
+function lengthForStep(step: PathStep, fallback: number): number {
+  const length = step.stepLength;
+  return length !== undefined && Number.isFinite(length) ? length : fallback;
 }
 
 function resolveConfig(config?: Partial<PathIntegrationConfig>): PathIntegrationConfig {

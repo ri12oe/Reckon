@@ -459,9 +459,12 @@ describe('precomputed steps and headings', () => {
     engine.pushStep({ t: 600, heading: 0 });
     const after = engine.getSnapshot();
     expect(after.rawPath.slice(0, 5)).toEqual(before.rawPath);
-    expect(after.rawPath[5]).toEqual({ x: 4.5, y: after.rawPath[5]!.y, t: 500 });
+    expect(after.rawPath[5]!.x).toBe(4.5);
     expect(after.rawPath[5]!.y).toBeCloseTo(0, 12);
-    expect(after.rawPath[6]).toEqual({ x: 4.5, y: 0.5, t: 600 });
+    expect(after.rawPath[5]!.t).toBe(500);
+    expect(after.rawPath[6]!.x).toBe(4.5);
+    expect(after.rawPath[6]!.y).toBeCloseTo(0.5, 12);
+    expect(after.rawPath[6]!.t).toBe(600);
 
     engine.setStepLength(2);
     expect(engine.getSnapshot().rawPath).toEqual(after.rawPath);

@@ -4,6 +4,7 @@ import {
   DEFAULT_PATH_INTEGRATION_CONFIG,
   DEFAULT_STEP_LENGTH_M,
   integratePath,
+  stepLengthsFor,
   stepOffset,
   type HeadingSample,
   type PathStep,
@@ -295,6 +296,40 @@ describe('integratePath', () => {
       originT: 250,
     });
     expect(parked[1]).toEqual({ x: 5, y: -2, t: 800 });
+  });
+
+  test('a step length on the step overrides the config; a missing or non-finite length does not', () => {
+    const path = integratePath(
+      [
+        { t: 100, heading: 0, stepLength: 1 },
+        { t: 200, heading: 0 },
+        { t: 300, heading: 0, stepLength: Number.NaN },
+      ],
+      0,
+      { stepLength: 0.5 },
+    );
+    expect(path).toEqual([
+      { x: 0, y: 0, t: 0 },
+      { x: 0, y: 1, t: 100 },
+      { x: 0, y: 1.5, t: 200 },
+      { x: 0, y: 2, t: 300 },
+    ]);
+  });
+
+  test('stepLengthsFor keeps a matching prefix and applies the open length after it', () => {
+    const first = stepLengthsFor([{ t: 100 }, { t: 200 }], [], 1);
+    expect(first).toEqual([
+      { t: 100, stepLength: 1 },
+      { t: 200, stepLength: 1 },
+    ]);
+
+    const second = stepLengthsFor([{ t: 100 }, { t: 200 }, { t: 50 }], first, 0.5);
+    expect(second).toEqual([
+      { t: 100, stepLength: 1 },
+      { t: 200, stepLength: 1 },
+      { t: 50, stepLength: 0.5 },
+    ]);
+    expect(stepLengthsFor([{ t: 100 }, { t: 200 }, { t: 50 }], second, 9)).toEqual(second);
   });
 
   test('a non-finite length or heading falls back to 0.75 m and 0°', () => {
