@@ -53,6 +53,8 @@ export type MagSample = {
   y: number;
   /** Microtesla, device +z down. */
   z: number;
+  /** Omitted when these axes are already in a trusted level frame. */
+  levelReady?: boolean;
 };
 
 export type FusedHeading = {

@@ -478,6 +478,65 @@ describe('fuseHeading', () => {
     expect(at(fused, 6000).heading).toBeCloseTo(90, 6);
   });
 
+  test('mag before a trusted level frame stays at 0° with no hold; the same east field acquires 90° at 500 ms', () => {
+    const early = clock(0, 480);
+    const late = clock(500, 1000);
+    const fused = fuseHeading(gyroAt(clock(0, 1000), 0), [
+      ...magAt(early, east()).map((sample) => ({ ...sample, levelReady: false as const })),
+      ...magAt(late, east()),
+    ]);
+
+    expect(early).toHaveLength(25);
+    expect(at(fused, 0)).toMatchObject({
+      heading: 0,
+      magneticHeading: 90,
+      magnitudeUt: 50,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(at(fused, 480)).toMatchObject({
+      heading: 0,
+      magneticHeading: 90,
+      magnitudeUt: 50,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(at(fused, 500)).toMatchObject({
+      heading: 90,
+      magneticHeading: 90,
+      magnitudeUt: 50,
+      gyroOnly: false,
+      interference: false,
+    });
+    expect(at(fused, 1000)).toMatchObject({
+      heading: 90,
+      gyroOnly: false,
+      interference: false,
+    });
+  });
+
+  test('200 µT before the level frame is ready stays at 0° and does not latch interference', () => {
+    const times = clock(0, 1000);
+    const fused = fuseHeading(
+      gyroAt(times, 0),
+      magAt(times, north(4)).map((sample) => ({ ...sample, levelReady: false as const })),
+    );
+
+    expect(at(fused, 0)).toMatchObject({
+      heading: 0,
+      magneticHeading: 0,
+      magnitudeUt: 200,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(at(fused, 1000)).toMatchObject({
+      heading: 0,
+      magnitudeUt: 200,
+      gyroOnly: true,
+      interference: false,
+    });
+  });
+
   test('a tilt brake holds the heading; a measured 0 rad/s integrates minus the bias', () => {
     const times = clock(0, 10000);
     const gyro = gyroAt(times, 3);
