@@ -11,10 +11,10 @@
  * 3. When the field is interfered, stop the blend and trust the gyro.
  *    A clean, stable window of `recoverHoldMs` resumes the blend when
  *    the compass is within `reacquireMaxDeg` of the gyro heading.
- *    A clean, stable disagreement that lasts `LONG_REACQUIRE_MS` snaps
- *    onto the compass once, and the angle check applies again after
- *    that snap. A compass that keeps moving, or that holds one heading
- *    for less than that, stays on the gyro.
+ *    A disagreement that stays within `FAR_STABLE_DEG` of one heading for
+ *    `LONG_REACQUIRE_MS` snaps onto the compass. Later samples use the
+ *    angle check again, and a later hold can snap too. Motion past
+ *    `FAR_STABLE_DEG` restarts that window.
  *
  * The first fix waits for the same clean, stable `recoverHoldMs` window.
  * It does not use the angle gate.
@@ -99,7 +99,8 @@ export type HeadingFusionConfig = {
   /**
    * A magnetometer heading farther than this from the gyro heading is not
    * trusted on the short recovery window. That window stays gyro-only.
-   * A longer clean disagreement snaps once.
+   * A longer clean disagreement snaps onto the compass, and a later
+   * hold can snap again.
    */
   reacquireMaxDeg: number;
   /** Milliseconds of clean, stable magnetometer samples required before a fix. */
@@ -490,17 +491,17 @@ function isJump(state: FusionState, magneticHeading: number, config: HeadingFusi
 
 const MAX_BIAS_COMPASS_RATE_DEG_PER_SEC = 30;
 
-/** A bias observation above this is a transient, not an offset to store. */
+/** An observation above this is dropped, steady or not. */
 const MAX_BIAS_OBS_DEG_PER_SEC = 5;
 
 /**
  * Clean disagreement, measured from the oldest sample of the first ready
- * window, that snaps onto the compass even when the residual is past
- * `reacquireMaxDeg`. Longer than the straight legs of a tilted square.
+ * window, that snaps onto the compass when the residual is past
+ * `reacquireMaxDeg`.
  */
 const LONG_REACQUIRE_MS = 5000;
 
-/** Compass motion past this restarts the long window. The compass has turned. */
+/** A sample farther than this from the anchor restarts the long window. */
 const FAR_STABLE_DEG = 10;
 
 function appliedYawDegPerSec(yaw: HeldYaw, biasDegPerSec: number): number {
