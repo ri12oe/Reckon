@@ -16,6 +16,7 @@ import { getActiveFloor, resumeLiveWalk, showSavedFloor } from '@/db/session';
 import { shareStoredFloor } from '@/db/share-floor';
 import { getEngine } from '@/engine';
 import { useTheme } from '@/hooks/use-theme';
+import { snapshotForSaveCard } from '@/library/save-card';
 import { pathThumbnail, type Thumbnail } from '@/map/thumbnail';
 import { formatDistance, pathLength } from '@/walk/stats';
 
@@ -33,7 +34,7 @@ export default function LibraryScreen() {
   const [query, setQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(() => getActiveFloor()?.id ?? null);
-  const [current, setCurrent] = useState(() => getEngine().getSnapshot());
+  const [current, setCurrent] = useState(() => snapshotForSaveCard(getEngine()));
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
   const buildingRef = useRef<ComponentRef<typeof TextInput>>(null);
   const store = ready ? getFloorStore() : null;
@@ -69,7 +70,7 @@ export default function LibraryScreen() {
     setFloors(list);
     setDetails(next);
     setActiveId(getActiveFloor()?.id ?? null);
-    setCurrent(getEngine().getSnapshot());
+    setCurrent(snapshotForSaveCard(getEngine()));
   }, []);
 
   useFocusEffect(
@@ -85,7 +86,7 @@ export default function LibraryScreen() {
       const saved = store.save({
         buildingName: building,
         floorName,
-        snapshot: getEngine().getSnapshot(),
+        snapshot: snapshotForSaveCard(getEngine()),
       });
       reload();
       setBuilding('');
