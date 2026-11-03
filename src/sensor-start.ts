@@ -16,8 +16,13 @@ export function sensorStartFaultMessage(result: SensorStartResult): string | nul
   return FAULT_COPY[result.reason];
 }
 
-export function walkPill(savedFloor: boolean, fault: SensorStartFault | undefined): WalkPill {
+export function walkPill(
+  savedFloor: boolean,
+  fault: SensorStartFault | undefined,
+  pitchPaused: boolean,
+): WalkPill {
   if (savedFloor) return { label: 'Saved floor', live: false };
   if (fault) return { label: FAULT_COPY[fault], live: false };
+  if (pitchPaused) return { label: 'Paused, hold it level', live: false };
   return { label: 'Live', live: true };
 }
