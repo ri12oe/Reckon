@@ -16,6 +16,7 @@ const savedFloor: EngineSnapshot = {
   stepCount: 4,
   heading: 12,
   pins: [],
+  pitchPaused: false,
 };
 
 function settled(result: SensorStartResult) {

@@ -461,6 +461,7 @@ describe('tilt gate', () => {
 
     play(0, 2200, 0, stepsAt([500, 1000, 1500]), still, () => 0);
     const walking = engine.getSnapshot();
+    expect(walking.pitchPaused).toBe(false);
     expect(walking.stepCount).toBe(3);
     expect(walking.heading).toBeCloseTo(0, 5);
 
@@ -469,16 +470,20 @@ describe('tilt gate', () => {
     const steepYaw = (t: number) => (t >= 4800 && t < 5800 ? Math.PI / 2 : 0);
     play(2220, 6200, 80, stepsAt([3000, 3500, 4000, 4500]), steepYaw, steepHeading);
     const paused = engine.getSnapshot();
+    expect(paused.pitchPaused).toBe(true);
     expect(paused.stepCount).toBe(walking.stepCount);
     expect(paused.heading).toBeCloseTo(walking.heading, 5);
     expect(paused.rawPath).toHaveLength(walking.rawPath.length);
+    expect(engine.snapshotForSave().pitchPaused).toBe(false);
+    expect(engine.getSnapshot().pitchPaused).toBe(true);
 
-    // Back to flat, now actually facing east. Hold still while gravity settles.
     play(6220, 9000, 0, still, still, () => 90);
     const settled = engine.getSnapshot();
+    expect(settled.pitchPaused).toBe(false);
 
     play(9020, 11000, 0, stepsAt([9500, 10000, 10500]), still, () => 90);
     const resumed = engine.getSnapshot();
+    expect(resumed.pitchPaused).toBe(false);
     expect(resumed.stepCount).toBe(settled.stepCount + 3);
 
     const turnHeading = (t: number) =>
@@ -501,6 +506,25 @@ describe('tilt gate', () => {
         turnedHeading: round4(turned.heading),
       }),
     );
+    engine.stopSensors();
+  });
+
+  test('free-fall after a trusted level pose stays unpaused and adds no step', async () => {
+    const sensors = motionSensors();
+    const engine = engineForSquare();
+    await engine.startSensors({ sensors, accelAtRest: 'down' });
+
+    for (let t = 0; t <= 400; t += DT_MS) {
+      sensors.Accelerometer.emit({ x: 0, y: 0, z: -1, timestamp: t / 1000 });
+    }
+    const level = engine.getSnapshot();
+    const fall = { x: 0, y: 0, z: 0 };
+    expect(worldDown(fall, 'down')).toBeNull();
+    expect(level.pitchPaused).toBe(false);
+    sensors.Accelerometer.emit({ ...fall, timestamp: 420 / 1000 });
+    const after = engine.getSnapshot();
+    expect(after.pitchPaused).toBe(false);
+    expect(after.stepCount).toBe(level.stepCount);
     engine.stopSensors();
   });
 });

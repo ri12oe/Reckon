@@ -37,6 +37,7 @@ const snapshot: EngineSnapshot = {
   stepCount: 1,
   heading: 90,
   pins: [{ id: 'door', x: 2, y: 0, label: 'door' }],
+  pitchPaused: false,
 };
 
 describe('path mode', () => {

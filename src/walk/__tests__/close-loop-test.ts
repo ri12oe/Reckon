@@ -51,6 +51,7 @@ describe('back at start visibility', () => {
       stepCount: 1,
       heading: 0,
       pins: [],
+      pitchPaused: false,
       isCannedDemo: true,
     };
     const engine = createLiveEngine({ emptySnapshot: nearStart });
@@ -127,6 +128,7 @@ describe('back at start visibility', () => {
       stepCount: 1,
       heading: 90,
       pins: [],
+      pitchPaused: false,
     };
     const farCorrected: EngineSnapshot = {
       ...nearCorrected,
@@ -210,6 +212,7 @@ describe('back at start', () => {
       stepCount: 20,
       heading: 90,
       pins: [],
+      pitchPaused: false,
     };
 
     engine.recallSnapshot(saved);

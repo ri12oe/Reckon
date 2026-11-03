@@ -85,6 +85,7 @@ describe('walk pill and a real start', () => {
       stepCount: 4,
       heading: 12,
       pins: [],
+      pitchPaused: false,
     });
     expect(walkPill(true, engine.getSnapshot().sensorStartFailed)).toEqual({
       label: 'Saved floor',

@@ -26,6 +26,7 @@ function recalledFloor(): StoredFloor {
       stepCount: 8,
       heading: 0,
       pins: [],
+      pitchPaused: false,
     },
   };
 }

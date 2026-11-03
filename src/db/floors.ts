@@ -398,6 +398,7 @@ type PersistedWalkBase = Pick<
 
 type PersistedWalk = PersistedWalkBase & {
   gyroOnly?: boolean;
+  pitchPaused: false;
 };
 
 function gyroOnlyToCell(flag: boolean | undefined): GyroOnlyCell {
@@ -413,8 +414,8 @@ function gyroOnlyFromCell(cell: unknown): boolean | undefined {
 }
 
 function withGyroOnly(base: PersistedWalkBase, gyroOnly: boolean | undefined): PersistedWalk {
-  if (gyroOnly === true || gyroOnly === false) return { ...base, gyroOnly };
-  return base;
+  if (gyroOnly === true || gyroOnly === false) return { ...base, gyroOnly, pitchPaused: false };
+  return { ...base, pitchPaused: false };
 }
 
 function copyPoint(point: PathPoint): PathPoint {

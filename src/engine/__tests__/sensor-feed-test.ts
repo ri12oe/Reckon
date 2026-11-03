@@ -624,6 +624,7 @@ describe('sensor feed into the live engine', () => {
       stepCount: 4,
       heading: 12,
       pins: [],
+      pitchPaused: false,
     };
     engine.recallSnapshot(saved);
     const sensors = motionSensors();
@@ -690,6 +691,7 @@ describe('sensor feed into the live engine', () => {
       stepCount: 3,
       heading: 45,
       pins: [],
+      pitchPaused: false,
     };
 
     engine.recallSnapshot(saved);
@@ -1005,6 +1007,7 @@ describe('getEngine', () => {
       stepCount: 0,
       heading: 0,
       pins: [],
+      pitchPaused: false,
     });
     expect(getEngine().getSnapshot().stepCount).toBe(12);
 

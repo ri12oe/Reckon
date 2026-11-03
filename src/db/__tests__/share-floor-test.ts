@@ -12,6 +12,7 @@ describe('liveWalkFloor', () => {
     stepCount: 6,
     heading: 37,
     pins: [{ id: 'pin-1', x: 3, y: 4, label: 'Pin 1' }],
+    pitchPaused: false,
   };
 
   test('exports the walk in progress like a saved floor', () => {
@@ -43,6 +44,7 @@ describe('liveWalkFloor', () => {
       stepCount: 0,
       heading: 0,
       pins: [],
+      pitchPaused: false,
     });
   });
 });
