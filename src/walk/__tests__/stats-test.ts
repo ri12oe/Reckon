@@ -96,6 +96,7 @@ describe('walk readout before a live sample', () => {
       stepCount: 1,
       heading: 10,
       pins: [{ id: 'desk', x: 3, y: 4, label: 'desk' }],
+      pitchPaused: false,
     };
     const readout = walkReadout(live);
     expect(readout).toEqual({ stepCount: 1, distance: '5.0 m', pinCount: 1 });

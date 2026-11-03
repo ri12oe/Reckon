@@ -129,6 +129,7 @@ export function sensorStartResult({
 export type SensorFeed = {
   stop(): void;
   readonly result: SensorStartResult;
+  readonly pitchPaused: boolean;
 };
 
 export type StartSensorFeedOptions = {
@@ -157,8 +158,8 @@ type AttitudeTracker = {
   gravityT: number | null;
   /** Latest world-down. Null until the first accelerometer sample. */
   down: Vec3 | null;
-  /** False while the pose is past `LEVEL_MAX_TILT_FROM_HORIZONTAL_DEG`. */
   level: boolean;
+  pitchPaused: boolean;
 };
 
 export function loadExpoMotionSensors(): MotionSensors {
@@ -221,7 +222,13 @@ export async function startSensorFeed(
     sink.pushMag(sample);
   });
   const result = sensorStartResult({ accelerometer, gyroscope, magnetometer });
-  const feed: SensorFeed = { stop, result };
+  const feed: SensorFeed = {
+    stop,
+    result,
+    get pitchPaused() {
+      return state.stopped ? false : attitude.pitchPaused;
+    },
+  };
   if (!result.ok) feed.stop();
   return feed;
 }
@@ -263,7 +270,7 @@ async function subscribe(
 }
 
 function createAttitudeTracker(atRest: AccelAtRest): AttitudeTracker {
-  return { atRest, gravity: null, gravityT: null, down: null, level: true };
+  return { atRest, gravity: null, gravityT: null, down: null, level: true, pitchPaused: false };
 }
 
 function observeAccel(
@@ -287,22 +294,21 @@ function observeAccel(
     tracker.down = worldDown(tracker.gravity, tracker.atRest);
   }
   const instant = worldDown(reading, tracker.atRest);
-  // No trusted gravity yet: assume the screen is up and still forward
-  // the accelerometer. A short or non-gravity sample must not tilt yaw.
   if (tracker.down === null) {
     tracker.level = true;
+    tracker.pitchPaused = false;
     return { accel: accelFromDevice(measurement, t), hold: null };
   }
-  // Free-fall and any other reading with no direction cannot be a step
-  // or a heading fix.
   if (instant === null) {
     const hold = tracker.level ? yawBrake(t) : null;
     tracker.level = false;
+    tracker.pitchPaused = false;
     return { accel: null, hold };
   }
   const level = attitudeIsLevel(tracker.down, instant);
   const hold = tracker.level && !level ? yawBrake(t) : null;
   tracker.level = level;
+  tracker.pitchPaused = !level;
   if (!level) return { accel: null, hold };
   return { accel: accelFromDevice(measurement, t), hold };
 }

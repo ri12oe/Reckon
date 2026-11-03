@@ -41,6 +41,7 @@ function sample(): EngineSnapshot {
     stepCount: 3,
     heading: 90,
     pins: [{ id: 'door', x: 1, y: 0, label: 'door' }],
+    pitchPaused: false,
   };
 }
 
@@ -170,6 +171,7 @@ function behavesLikeFloorStore(name: string, open: () => FloorStore | Promise<Fl
         stepCount: 0,
         heading: 0,
         pins: [],
+        pitchPaused: false,
       };
       expect(saved.snapshot).toEqual(empty);
       expect(store.get(saved.id)?.snapshot).toEqual(empty);

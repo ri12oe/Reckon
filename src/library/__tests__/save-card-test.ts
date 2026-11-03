@@ -85,6 +85,7 @@ describe('snapshotForSaveCard', () => {
       stepCount: 1,
       heading: 90,
       pins: [],
+      pitchPaused: false,
       sensorStartFailed: 'permission',
     };
     const stripped: EngineSnapshot = { ...shown };

@@ -66,6 +66,7 @@ describe('createLiveEngine', () => {
       stepCount: 0,
       heading: 0,
       pins: [],
+      pitchPaused: false,
     });
   });
 
@@ -163,6 +164,7 @@ describe('sensor walk', () => {
       stepCount: 0,
       heading: 0,
       pins: [],
+      pitchPaused: false,
     });
   });
 
@@ -806,6 +808,7 @@ describe('drift correction on the live path', () => {
       stepCount: 9,
       heading: 10,
       pins: [],
+      pitchPaused: false,
     };
     const engine = createLiveEngine({ emptySnapshot: demo });
     expect(engine.getSnapshot()).toEqual(demo);
@@ -817,6 +820,7 @@ describe('drift correction on the live path', () => {
       stepCount: 2,
       heading: 45,
       pins: [{ id: 'pin', x: 4, y: 0, label: 'pin' }],
+      pitchPaused: false,
     };
     engine.recallSnapshot(saved);
     saved.pins[0]!.label = 'changed';
@@ -860,6 +864,7 @@ describe('drift correction on the live path', () => {
       stepCount: 2,
       heading: 90,
       pins: [],
+      pitchPaused: false,
     };
     engine.recallSnapshot(saved);
     engine.pushAccel({ t: 800, x: 0, y: 0, z: STANDARD_GRAVITY_MPS2 });
@@ -905,6 +910,7 @@ describe('drift correction on the live path', () => {
       stepCount: 1,
       heading: 90,
       pins: [],
+      pitchPaused: false,
     };
     engine.recallSnapshot(saved);
     expect(engine.snapshotForSave().stepCount).toBe(1);

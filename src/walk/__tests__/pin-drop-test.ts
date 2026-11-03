@@ -144,6 +144,7 @@ describe('walk pin drop', () => {
       stepCount: 2,
       heading: 45,
       pins: [],
+      pitchPaused: false,
     };
 
     const settled = readWalk(saved, demo, true, [pin]);

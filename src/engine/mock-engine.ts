@@ -25,6 +25,7 @@ const snapshot: EngineSnapshot = {
     { id: 'door', x: 4.5, y: 1.5, label: 'door' },
     { id: 'desk', x: 4.5, y: 4.5, label: 'desk' },
   ],
+  pitchPaused: false,
   isCannedDemo: true,
 };
 
@@ -41,6 +42,7 @@ export function emptyRecording(): EngineSnapshot {
     stepCount: 0,
     heading: 0,
     pins: [],
+    pitchPaused: false,
   };
 }
 

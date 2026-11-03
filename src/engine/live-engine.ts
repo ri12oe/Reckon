@@ -315,6 +315,7 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       stepCount: countCalibrationSteps(steps),
       heading: snapshotHeading(course, steps),
       pins: resolvePins(drift, corrected.corrected),
+      pitchPaused: false,
     };
     if (course.kind === 'fused') snapshot.gyroOnly = course.gyroOnly;
     return snapshot;
@@ -421,6 +422,12 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
     if (fusedHeadings.length > HEADING_SAMPLE_CAP) {
       fusedHeadings.splice(0, fusedHeadings.length - HEADING_SAMPLE_CAP);
     }
+  }
+
+  function shownPitchPaused(): boolean {
+    if (recalled) return false;
+    if (!accepted && emptySnapshot) return false;
+    return feed?.pitchPaused ?? false;
   }
 
   const engine: LiveFloorwalkerEngine = {
@@ -559,14 +566,15 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       return stepLengthM;
     },
     getSnapshot() {
-      if (recalled) return present(recalled, sensorFault);
-      if (!accepted && emptySnapshot) return present(emptySnapshot, sensorFault);
+      const pitchPaused = shownPitchPaused();
+      if (recalled) return present(recalled, sensorFault, pitchPaused);
+      if (!accepted && emptySnapshot) return present(emptySnapshot, sensorFault, pitchPaused);
       if (!cached) {
         cached = compute();
         lastExamined = examined;
         examined = 0;
       }
-      return present(cached, sensorFault);
+      return present(cached, sensorFault, pitchPaused);
     },
     snapshotForSave() {
       const shown = engine.getSnapshot();
@@ -840,10 +848,15 @@ function copyLoopTarget(
   return { x: target.x, y: target.y };
 }
 
-function present(snapshot: EngineSnapshot, fault: SensorStartFault | null): EngineSnapshot {
+function present(
+  snapshot: EngineSnapshot,
+  fault: SensorStartFault | null,
+  pitchPaused: boolean,
+): EngineSnapshot {
   const copy = cloneSnapshot(snapshot);
   if (fault) copy.sensorStartFailed = fault;
   else delete copy.sensorStartFailed;
+  copy.pitchPaused = pitchPaused;
   return copy;
 }
 
@@ -854,6 +867,7 @@ function cloneSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
     stepCount: snapshot.stepCount,
     heading: snapshot.heading,
     pins: snapshot.pins.map((pin) => ({ id: pin.id, x: pin.x, y: pin.y, label: pin.label })),
+    pitchPaused: false,
   };
   if (snapshot.gyroOnly !== undefined) copy.gyroOnly = snapshot.gyroOnly;
   if (snapshot.sensorStartFailed !== undefined) copy.sensorStartFailed = snapshot.sensorStartFailed;
