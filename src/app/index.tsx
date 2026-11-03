@@ -145,7 +145,13 @@ export default function WalkScreen() {
     <Screen
       title="Walk"
       subtitle={active ? `${active.buildingName} · ${active.name}` : 'Live walk'}
-      headerRight={<StatusPill savedFloor={active !== null} fault={snapshot.sensorStartFailed} />}
+      headerRight={
+        <StatusPill
+          savedFloor={active !== null}
+          fault={snapshot.sensorStartFailed}
+          pitchPaused={snapshot.pitchPaused}
+        />
+      }
       background={<GridBackground />}
     >
       <Glass style={styles.readout}>
@@ -223,12 +229,14 @@ export default function WalkScreen() {
 function StatusPill({
   savedFloor,
   fault,
+  pitchPaused,
 }: {
   savedFloor: boolean;
   fault: SensorStartFault | undefined;
+  pitchPaused: boolean;
 }) {
   const theme = useTheme();
-  const pill = walkPill(savedFloor, fault);
+  const pill = walkPill(savedFloor, fault, pitchPaused);
   return (
     <Glass style={styles.pill}>
       <View
