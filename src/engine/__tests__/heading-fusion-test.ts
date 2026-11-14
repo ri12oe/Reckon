@@ -368,6 +368,87 @@ describe('fuseHeading', () => {
     expect(at(followed, 3000).interference).toBe(false);
   });
 
+  test('40 µT → 60 µT at a still compass re-baselines at 6000 ms', () => {
+    const times = clock(0, 8000);
+    const fused = fuseHeading(
+      gyroAt(times, 0),
+      magAt(times, (t) => {
+        if (t >= 7000) return field(15, 1.2);
+        if (t >= 1000) return north(1.2);
+        return north(0.8);
+      }),
+    );
+
+    expect(at(fused, 400)).toMatchObject({
+      heading: 0,
+      magnitudeUt: 40,
+      gyroOnly: false,
+      interference: false,
+    });
+    expect(at(fused, 1000)).toMatchObject({
+      heading: 0,
+      magnitudeUt: 60,
+      magneticHeading: 0,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 5980)).toMatchObject({
+      heading: 0,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 6000)).toMatchObject({
+      heading: 0,
+      magnitudeUt: 60,
+      magneticHeading: 0,
+      gyroOnly: false,
+      interference: false,
+    });
+    expect(at(fused, 6980)).toMatchObject({
+      heading: 0,
+      magnitudeUt: 60,
+      gyroOnly: false,
+      interference: false,
+    });
+    expect(at(fused, 7980).magnitudeUt).toBe(60);
+    expect(at(fused, 7980)).toMatchObject({ gyroOnly: false, interference: false });
+    expect(at(fused, 7980).heading).toBeCloseTo(15 * (1 - Math.exp(-1 / 1.5)), 4);
+    expect(at(fused, 8000)).toMatchObject({
+      magnitudeUt: 60,
+      gyroOnly: false,
+      interference: false,
+    });
+  });
+
+  test('40 µT → 200 µT stays gyro-only past the long window', () => {
+    const times = clock(0, 15000);
+    const fused = fuseHeading(
+      gyroAt(times, 0),
+      magAt(times, (t) => (t >= 1000 ? north(4) : north(0.8))),
+    );
+    const held = fused.filter((sample) => sample.t >= 1000);
+
+    expect(at(fused, 400)).toMatchObject({ magnitudeUt: 40, gyroOnly: false });
+    expect(at(fused, 1000).magnitudeUt).toBe(200);
+    expect(held.every((sample) => sample.heading === 0)).toBe(true);
+    expect(held.every((sample) => sample.gyroOnly && sample.interference)).toBe(true);
+  });
+
+  test('60 µT with a turning compass and a still gyro stays gyro-only', () => {
+    const times = clock(0, 12000);
+    const fused = fuseHeading(
+      gyroAt(times, 0),
+      magAt(times, (t) => (t >= 1000 ? field(30 * (t / 1000), 1.2) : north(0.8))),
+    );
+    const held = fused.filter((sample) => sample.t >= 1000);
+
+    expect(at(fused, 400)).toMatchObject({ heading: 0, magnitudeUt: 40, gyroOnly: false });
+    expect(at(fused, 1000).magnitudeUt).toBeCloseTo(60, 6);
+    expect(at(fused, 11000).magneticHeading).toBeCloseTo(330, 4);
+    expect(held.every((sample) => sample.heading === 0)).toBe(true);
+    expect(held.every((sample) => sample.gyroOnly && sample.interference)).toBe(true);
+  });
+
   test('150 µT / 240° spike during a 90° turn: fused is 22.5°, 45.0°, 90.0° and trust returns at 3400 ms', () => {
     const times = clock(0, 4000);
     const fused = fuseHeading(
