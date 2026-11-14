@@ -21,9 +21,9 @@ type CalibrationRow = {
   step_count: number | null;
 };
 
-function memoryDb(): FakeDb {
+function memoryDb(initial: CalibrationRow | null = null): FakeDb {
   let ready = false;
-  let row: CalibrationRow | null = null;
+  let row: CalibrationRow | null = initial;
   return {
     execSync(source) {
       if (source.includes('ALTER TABLE') && source.includes('calibration')) return;
@@ -184,6 +184,27 @@ describe('commitStepLength', () => {
       east(live, 100);
       expect(live.getSnapshot().stepCount).toBe(1);
       expect(live.getSnapshot().rawPath[1]!.x).toBe(0.625);
+    });
+  });
+
+  test('a stored 5 m stride boots at 0.75 m and the next east step ends at 0.75 m', () => {
+    state.db = memoryDb({
+      calibrated: 1,
+      step_length_m: 5,
+      distance_m: 5,
+      step_count: 1,
+    });
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getEngine } = require('@/engine') as typeof import('@/engine');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const store = require('@/db/calibration') as typeof import('@/db/calibration');
+      expect(store.readStepLength()).toBeNull();
+      expect(store.isCalibrated()).toBe(false);
+      const live = getEngine();
+      expect(live.getStepLength()).toBe(0.75);
+      live.pushStep({ t: 100, heading: 90 });
+      expect(live.getSnapshot().rawPath[1]!.x).toBe(0.75);
     });
   });
 
