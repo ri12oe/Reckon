@@ -134,6 +134,9 @@ export {
   alignLandmarks,
   closeLoop,
   correctDrift,
+  LOOP_CLOSURE_RADIUS_M,
+  loopClosureCounts,
+  MIN_LOOP_PATH_M,
   nearestCorridorAxis,
   snapCorridor,
 } from '@/engine/drift-correction';

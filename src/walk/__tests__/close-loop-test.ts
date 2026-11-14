@@ -1,6 +1,8 @@
 import {
+  closeLoop,
   createLiveEngine,
   isCannedDemo,
+  loopClosureCounts,
   mockEngine,
   type EngineSnapshot,
   type LiveFloorwalkerEngine,
@@ -74,7 +76,7 @@ describe('back at start visibility', () => {
     expect(showBackAtStart(shown)).toBe(false);
   });
 
-  test('shows when a live step leaves the corrected end within 3 m of the start', () => {
+  test('a single 1 m step is not back at the start', () => {
     const engine = createLiveEngine({ emptySnapshot: mockEngine.getSnapshot(), stepLengthM: 1 });
     engine.pushStep({ t: 500, heading: 90 });
     const shown = engine.getSnapshot();
@@ -82,37 +84,76 @@ describe('back at start visibility', () => {
     expect(isCannedDemo(shown)).toBe(false);
     expect(shown.stepCount).toBe(1);
     expect(gaps(shown).correctedFromStart).toBeCloseTo(1, 6);
-    expect(showBackAtStart(shown)).toBe(true);
+    expect(loopClosureCounts(shown.correctedPath)).toBe(false);
+    expect(showBackAtStart(shown)).toBe(false);
   });
 
-  test('shows when the corrected end is exactly 3 m from the path start', () => {
+  test('shows when a walk of at least 8 m ends exactly 3 m from the path start', () => {
     const engine = createLiveEngine({ stepLengthM: 1 });
-    east(engine, 3);
+    east(engine, 6);
+    for (let index = 0; index < 3; index += 1) {
+      engine.pushStep({ t: 4000 + (index + 1) * 500, heading: 270 });
+    }
     const shown = engine.getSnapshot();
 
-    expect(shown.stepCount).toBe(3);
+    expect(shown.stepCount).toBe(9);
     expect(gaps(shown).correctedFromStart).toBeCloseTo(3, 6);
     expect(showBackAtStart(shown)).toBe(true);
   });
 
   test('hides when the corrected end is farther than 3 m from the path start', () => {
-    const engine = createLiveEngine({ stepLengthM: 3.01 });
-    engine.pushStep({ t: 500, heading: 90 });
+    const engine = createLiveEngine({ stepLengthM: 1 });
+    east(engine, 8);
     const shown = engine.getSnapshot();
 
-    expect(shown.stepCount).toBe(1);
-    expect(gaps(shown).correctedFromStart).toBeGreaterThan(3);
+    expect(shown.stepCount).toBe(8);
+    expect(gaps(shown).correctedFromStart).toBeCloseTo(8, 6);
     expect(showBackAtStart(shown)).toBe(false);
   });
 
   test('measures that gap from the path start when the walk did not begin at the world origin', () => {
     const engine = createLiveEngine({ originX: 20, originY: -4, stepLengthM: 1 });
-    engine.pushStep({ t: 500, heading: 90 });
+    const headings = [
+      ...Array<number>(4).fill(0),
+      ...Array<number>(4).fill(90),
+      ...Array<number>(4).fill(180),
+      ...Array<number>(3).fill(270),
+    ];
+    headings.forEach((heading, index) => {
+      engine.pushStep({ t: (index + 1) * 500, heading });
+    });
     const shown = engine.getSnapshot();
+    const end = shown.correctedPath.at(-1)!;
 
     expect(shown.correctedPath[0]).toMatchObject({ x: 20, y: -4 });
     expect(gaps(shown).correctedFromStart).toBeCloseTo(1, 6);
+    expect(Math.hypot(end.x, end.y)).toBeGreaterThan(3);
     expect(showBackAtStart(shown)).toBe(true);
+  });
+
+  test('a rectangular loop still counts and still closes on the start', () => {
+    const engine = createLiveEngine({ stepLengthM: 1, drift: { corridor: false } });
+    const headings = [
+      ...Array<number>(4).fill(0),
+      ...Array<number>(6).fill(90),
+      ...Array<number>(4).fill(180),
+      ...Array<number>(4).fill(270),
+    ];
+    headings.forEach((heading, index) => {
+      engine.pushStep({ t: (index + 1) * 500, heading });
+    });
+    const shown = engine.getSnapshot();
+    const start = shown.correctedPath[0]!;
+
+    expect(shown.stepCount).toBe(18);
+    expect(gaps(shown).correctedFromStart).toBeCloseTo(2, 6);
+    expect(loopClosureCounts(shown.correctedPath)).toBe(true);
+    expect(showBackAtStart(shown)).toBe(true);
+
+    const closed = closeLoop(shown.correctedPath);
+    const end = closed.at(-1)!;
+    expect(closed[0]).toEqual(start);
+    expect(Math.hypot(end.x - start.x, end.y - start.y)).toBeLessThan(1e-9);
   });
 
   test('follows the corrected end when the raw end is somewhere else', () => {
@@ -123,9 +164,11 @@ describe('back at start visibility', () => {
       ],
       correctedPath: [
         { x: 0, y: 0, t: 0 },
-        { x: 2, y: 0, t: 500 },
+        { x: 0, y: 6, t: 500 },
+        { x: 2, y: 6, t: 1000 },
+        { x: 2, y: 0, t: 1500 },
       ],
-      stepCount: 1,
+      stepCount: 3,
       heading: 90,
       pins: [],
       pitchPaused: false,
@@ -138,7 +181,9 @@ describe('back at start visibility', () => {
       ],
       correctedPath: [
         { x: 0, y: 0, t: 0 },
-        { x: 10, y: 0, t: 500 },
+        { x: 0, y: 6, t: 500 },
+        { x: 10, y: 6, t: 1000 },
+        { x: 10, y: 0, t: 1500 },
       ],
     };
 

@@ -4,6 +4,7 @@ import {
   alignLandmarks,
   closeLoop,
   correctDrift,
+  loopClosureCounts,
   getEngine,
   mockEngine,
   nearestCorridorAxis,
@@ -222,6 +223,54 @@ describe('closeLoop', () => {
     expect(corrected[3]!.y).toBe(0);
     expect(corrected[3]!.t).toBe(3000);
     expect(corrected[4]).toEqual({ x: 0, y: 0, t: 4000 });
+    expect(loopClosureCounts(raw)).toBe(true);
+  });
+
+  test('a single 1 m step does not count as a loop', () => {
+    const step: PathPoint[] = [
+      { x: 0, y: 0, t: 0 },
+      { x: 1, y: 0, t: 500 },
+    ];
+    expect(loopClosureCounts(step)).toBe(false);
+  });
+
+  test('loop closure counts after 8 m walked and within 3 m of the start', () => {
+    const outAndBack = (out: number): PathPoint[] => [
+      { x: 0, y: 0, t: 0 },
+      { x: 0, y: out, t: 1000 },
+      { x: 0, y: 0, t: 2000 },
+    ];
+    expect(loopClosureCounts(outAndBack(4))).toBe(true);
+    expect(loopClosureCounts(outAndBack(3.9))).toBe(false);
+
+    const shortOfTheMinimum: PathPoint[] = [
+      { x: 0, y: 0, t: 0 },
+      { x: 0, y: 5, t: 1000 },
+      { x: 0, y: 3, t: 2000 },
+    ];
+    expect(loopClosureCounts(shortOfTheMinimum)).toBe(false);
+
+    const onTheRadius: PathPoint[] = [
+      { x: 0, y: 0, t: 0 },
+      { x: 0, y: 6, t: 1000 },
+      { x: 0, y: 3, t: 2000 },
+    ];
+    expect(loopClosureCounts(onTheRadius)).toBe(true);
+
+    const pastTheRadius: PathPoint[] = [
+      { x: 0, y: 0, t: 0 },
+      { x: 0, y: 6, t: 1000 },
+      { x: 0, y: 3.1, t: 2000 },
+    ];
+    expect(loopClosureCounts(pastTheRadius)).toBe(false);
+    expect(loopClosureCounts([])).toBe(false);
+    expect(loopClosureCounts([{ x: 0, y: 0, t: 0 }])).toBe(false);
+    expect(
+      loopClosureCounts([
+        { x: 0, y: 0, t: 0 },
+        { x: Number.NaN, y: 0, t: 500 },
+      ]),
+    ).toBe(false);
   });
 
   test('a loop that already ends on the start is copied unchanged', () => {
