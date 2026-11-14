@@ -423,15 +423,15 @@ describe('correctDrift', () => {
 });
 
 describe('getEngine', () => {
-  test('serves the demo snapshot until a sample; mockEngine keeps the static walk', () => {
+  test('serves an empty path until a sample; mockEngine keeps the static walk', () => {
     const snapshot = getEngine().getSnapshot();
-    expect(snapshot.stepCount).toBe(12);
-    expect(snapshot.heading).toBe(90);
-    expect(snapshot.rawPath).toHaveLength(7);
-    expect(snapshot.correctedPath[0]).toEqual({ x: 0, y: 0, t: 0 });
-    expect(snapshot.correctedPath[1]).toEqual({ x: 1.5, y: 0, t: 1200 });
-    expect(snapshot.pins.map((pin) => pin.id)).toEqual(['door', 'desk']);
-    expect(snapshot).toEqual(mockEngine.getSnapshot());
+    expect(snapshot.stepCount).toBe(0);
+    expect(Number.isFinite(snapshot.heading)).toBe(false);
+    expect(snapshot.rawPath).toEqual([]);
+    expect(snapshot.correctedPath).toEqual([]);
+    expect(snapshot.pins).toEqual([]);
+    expect(snapshot.isCannedDemo).toBeUndefined();
+    expect(snapshot).not.toEqual(mockEngine.getSnapshot());
 
     const mock = mockEngine.getSnapshot();
     expect(mock.stepCount).toBe(12);

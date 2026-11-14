@@ -248,16 +248,16 @@ describe('detectSteps', () => {
 });
 
 describe('getEngine', () => {
-  test('serves the demo snapshot until a sample; mockEngine keeps the static walk', () => {
+  test('serves an empty path until a sample; mockEngine keeps the static walk', () => {
     const snapshot = getEngine().getSnapshot();
     const mock = mockEngine.getSnapshot();
-    expect(snapshot).toEqual(mock);
+    expect(snapshot).not.toEqual(mock);
     expect(snapshot).not.toBe(mock);
-    expect(snapshot.stepCount).toBe(12);
-    expect(snapshot.heading).toBe(90);
-    expect(snapshot.rawPath).toHaveLength(7);
-    expect(snapshot.correctedPath).toHaveLength(7);
-    expect(snapshot.pins.map((pin) => pin.id)).toEqual(['door', 'desk']);
+    expect(snapshot.stepCount).toBe(0);
+    expect(Number.isFinite(snapshot.heading)).toBe(false);
+    expect(snapshot.rawPath).toEqual([]);
+    expect(snapshot.correctedPath).toEqual([]);
+    expect(snapshot.pins).toEqual([]);
 
     expect(mock.stepCount).toBe(12);
     expect(mock.heading).toBe(90);

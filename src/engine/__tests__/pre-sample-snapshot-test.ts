@@ -129,12 +129,16 @@ describe('snapshot before the first finite sample', () => {
   });
 
   test('web getEngine keeps the canned path and heading 90 until a real sample', () => {
-    const previous = Platform.OS;
-    Platform.OS = 'web';
-    try {
-      jest.isolateModules(() => {
-        const loaded = require('@/engine') as typeof import('@/engine');
-        const engine = loaded.getEngine();
+    jest.isolateModules(() => {
+      // isolateModules only accepts a synchronous factory.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const reactNative = require('react-native') as typeof import('react-native');
+      const previous = reactNative.Platform.OS;
+      reactNative.Platform.OS = 'web';
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const loaded = require('@/engine') as typeof import('@/engine');
+      const engine = loaded.getEngine();
+      try {
         const before = engine.getSnapshot();
         const mock = loaded.mockEngine.getSnapshot();
 
@@ -171,9 +175,9 @@ describe('snapshot before the first finite sample', () => {
           isCannedDemo: false,
         });
         expect(after.rawPath).toEqual([{ x: 0, y: 0, t: 0 }]);
-      });
-    } finally {
-      Platform.OS = previous;
-    }
+      } finally {
+        reactNative.Platform.OS = previous;
+      }
+    });
   });
 });

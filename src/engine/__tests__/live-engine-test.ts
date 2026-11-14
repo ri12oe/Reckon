@@ -965,7 +965,7 @@ describe('drift correction on the live path', () => {
 });
 
 describe('getEngine', () => {
-  test('returns one live engine and serves the demo until the first sample', () => {
+  test('returns one live engine and serves an empty path until the first sample', () => {
     expect(getEngine()).toBe(getEngine());
     expect(getEngine()).not.toBe(mockEngine);
     expect(getEngine()).not.toBe(createLiveEngine());
@@ -973,10 +973,13 @@ describe('getEngine', () => {
     expect(typeof getEngine().stopSensors).toBe('function');
 
     const snapshot = getEngine().getSnapshot();
-    expect(snapshot).toEqual(mockEngine.getSnapshot());
+    expect(snapshot).not.toEqual(mockEngine.getSnapshot());
     expect(snapshot).not.toBe(mockEngine.getSnapshot());
-    expect(snapshot.stepCount).toBe(12);
-    expect(snapshot.heading).toBe(90);
+    expect(snapshot.stepCount).toBe(0);
+    expect(Number.isFinite(snapshot.heading)).toBe(false);
+    expect(snapshot.rawPath).toEqual([]);
+    expect(snapshot.correctedPath).toEqual([]);
+    expect(snapshot.isCannedDemo).toBeUndefined();
 
     const mock = mockEngine.getSnapshot();
     expect(mock.stepCount).toBe(12);

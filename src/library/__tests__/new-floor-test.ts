@@ -1,6 +1,6 @@
 import type { StoredFloor } from '@/db/floors';
 import { getActiveFloor, resumeLiveWalk, showSavedFloor } from '@/db/session';
-import { emptyRecording, getEngine, mockEngine } from '@/engine';
+import { getEngine, type EngineSnapshot } from '@/engine';
 import { startNewFloor } from '@/library/new-floor';
 
 function recalledFloor(): StoredFloor {
@@ -42,7 +42,7 @@ describe('startNewFloor', () => {
     resumeLiveWalk();
   });
 
-  test('a walked floor returns to the demo and the save card is empty', () => {
+  test('a walked floor returns to an empty path and the save card matches it', () => {
     const engine = getEngine();
     engine.pushStep({ t: 500, heading: 0 });
     expect(engine.getSnapshot().stepCount).toBe(1);
@@ -52,8 +52,8 @@ describe('startNewFloor', () => {
 
     expect(getActiveFloor()).toBeNull();
     expect(engine.isRecalled()).toBe(false);
-    expect(engine.getSnapshot()).toEqual(mockEngine.getSnapshot());
-    expect(card).toEqual(emptyRecording());
+    expect(engine.getSnapshot()).toEqual(blankLiveSnapshot());
+    expect(card).toEqual(blankLiveSnapshot());
   });
 
   test('a recalled floor is no longer showing and the walk underneath is cleared', () => {
@@ -73,8 +73,8 @@ describe('startNewFloor', () => {
 
     expect(getActiveFloor()).toBeNull();
     expect(engine.isRecalled()).toBe(false);
-    expect(engine.getSnapshot()).toEqual(mockEngine.getSnapshot());
-    expect(card).toEqual(emptyRecording());
+    expect(engine.getSnapshot()).toEqual(blankLiveSnapshot());
+    expect(card).toEqual(blankLiveSnapshot());
   });
 
   test('a second press stays on the empty card with no floor showing', () => {
@@ -87,7 +87,18 @@ describe('startNewFloor', () => {
 
     expect(getActiveFloor()).toBeNull();
     expect(engine.isRecalled()).toBe(false);
-    expect(engine.getSnapshot()).toEqual(mockEngine.getSnapshot());
-    expect(card).toEqual(emptyRecording());
+    expect(engine.getSnapshot()).toEqual(blankLiveSnapshot());
+    expect(card).toEqual(blankLiveSnapshot());
   });
 });
+
+function blankLiveSnapshot(): EngineSnapshot {
+  return {
+    rawPath: [],
+    correctedPath: [],
+    stepCount: 0,
+    heading: Number.NaN,
+    pins: [],
+    pitchPaused: false,
+  };
+}

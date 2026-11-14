@@ -33,13 +33,17 @@ describe('snapshotForSaveCard', () => {
     expect(engine.getSnapshot().stepCount).toBe(12);
   });
 
-  test('the shared engine serves the same empty card while the picture stays the demo', () => {
+  test('the shared engine card is the blank live snapshot before a sample', () => {
     const engine = getEngine();
+    const shown = engine.getSnapshot();
     const card = snapshotForSaveCard(engine);
-    expect(engine.getSnapshot().isCannedDemo).toBe(true);
-    expect(cardLine(engine.getSnapshot())).toBe('12 steps · 9.0 m');
-    expect(cardLine(card)).toBe('0 steps · 0 m');
-    expect(card).toEqual(engine.snapshotForSave());
+    expect(shown.isCannedDemo).toBeUndefined();
+    expect(shown.rawPath).toEqual([]);
+    expect(Number.isFinite(shown.heading)).toBe(false);
+    expect(cardLine(shown)).toBe('0 steps · 0 m');
+    expect(card).toEqual(shown);
+    expect(engine.snapshotForSave().heading).toBe(0);
+    expect(engine.snapshotForSave().rawPath).toEqual([{ x: 0, y: 0, t: 0 }]);
   });
 
   test('a recalled demo with an extra pin still saves empty', () => {
