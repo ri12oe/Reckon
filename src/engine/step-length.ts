@@ -2,17 +2,12 @@
  * Step length from a known-distance calibration walk.
  *
  * The walker covers a measured course (a taped line, a known hallway).
- * The step count is how many steps fell on that course. Mean length is
- *
- *   stepLength = distanceM / stepCount
- *
- * in meters per step, the `stepLength` argument of `integratePath`.
+ * The step count is how many steps fell on that course.
  * Before a walk produces an estimate, callers keep the length they already
  * use. The path integrator's default is 0.75 m.
  *
  * A course with no usable steps, a non-positive distance, a non-integer
  * count, or a ratio that is not a positive finite number has no estimate.
- * The ratio is not clamped to a typical human stride.
  *
  * Not in this module: path integration, corridor snap, loop closure,
  * landmarks, or any other drift correction. The measured distance is an
@@ -20,6 +15,10 @@
  */
 
 import { DEFAULT_STEP_LENGTH_M } from '@/engine/path-integration';
+
+export const MIN_STEP_LENGTH_M = 0.3;
+
+export const MAX_STEP_LENGTH_M = 1.2;
 
 export type CalibrationWalk = {
   /** Measured course length, meters. Finite and greater than 0. */
@@ -32,7 +31,7 @@ export type CalibrationWalk = {
 };
 
 export type StepLengthEstimate = {
-  /** Meters per step: distanceM / stepCount. Positive and finite. */
+  /** Meters per step. Positive, finite, and inside 0.3 to 1.2. */
   stepLengthM: number;
   /** Course length that produced this estimate, meters. */
   distanceM: number;
@@ -49,9 +48,10 @@ export function estimateStepLength(walk: CalibrationWalk): StepLengthEstimate | 
   if (!Number.isFinite(distanceM) || distanceM <= 0) return null;
   if (!Number.isInteger(stepCount) || stepCount < 1) return null;
 
-  const stepLengthM = distanceM / stepCount;
-  if (!Number.isFinite(stepLengthM) || stepLengthM <= 0) return null;
+  const ratio = distanceM / stepCount;
+  if (!Number.isFinite(ratio) || ratio <= 0) return null;
 
+  const stepLengthM = Math.min(MAX_STEP_LENGTH_M, Math.max(MIN_STEP_LENGTH_M, ratio));
   return { stepLengthM, distanceM, stepCount };
 }
 

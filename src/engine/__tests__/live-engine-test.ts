@@ -512,7 +512,7 @@ describe('precomputed steps and headings', () => {
     expect(engine.getSnapshot().rawPath[1]).toEqual({ x: 0, y: 0.75, t: 100 });
   });
 
-  test('15 m over 20 detected steps is 0.75 m/step; dividing by 10 would be 1.5 and end at 30 m', () => {
+  test('15 m over 20 steps stays 0.75 m/step; 15 m over 10 steps caps at 1.2 m and ends at 24 m', () => {
     const engine = createLiveEngine();
     for (let i = 0; i < 20; i++) engine.pushStep({ t: (i + 1) * 400, heading: 90 });
 
@@ -539,12 +539,12 @@ describe('precomputed steps and headings', () => {
     const dividedByTen = createLiveEngine();
     for (let i = 0; i < 20; i++) dividedByTen.pushStep({ t: (i + 1) * 400, heading: 90 });
     expect(dividedByTen.calibrateStepLength(15, 10)).toEqual({
-      stepLengthM: 1.5,
+      stepLengthM: 1.2,
       distanceM: 15,
       stepCount: 10,
     });
-    expect(dividedByTen.getSnapshot().rawPath[20]!.x).toBe(30);
-    expect(dividedByTen.getStepLength()).toBe(1.5);
+    expect(dividedByTen.getSnapshot().rawPath[20]!.x).toBeCloseTo(24, 12);
+    expect(dividedByTen.getStepLength()).toBe(1.2);
   });
 
   test('calibrateStepLength rescales the measured course; a later setStepLength does not', () => {
@@ -553,13 +553,13 @@ describe('precomputed steps and headings', () => {
     expect(engine.getSnapshot().rawPath[4]!.x).toBe(4);
     expect(engine.getSnapshot().rawPath[4]!.t).toBe(400);
 
-    expect(engine.calibrateStepLength(8)).toEqual({
-      stepLengthM: 2,
-      distanceM: 8,
+    expect(engine.calibrateStepLength(3)).toEqual({
+      stepLengthM: 0.75,
+      distanceM: 3,
       stepCount: 4,
     });
     const course = engine.getSnapshot().rawPath;
-    expect(course.map((point) => point.x)).toEqual([0, 2, 4, 6, 8]);
+    expect(course.map((point) => point.x)).toEqual([0, 0.75, 1.5, 2.25, 3]);
     expect(course.map((point) => point.t)).toEqual([0, 100, 200, 300, 400]);
 
     engine.setStepLength(0.5);
@@ -567,10 +567,10 @@ describe('precomputed steps and headings', () => {
     expect(engine.getSnapshot().rawPath).toEqual(course);
     engine.pushStep({ t: 500, heading: 90 });
     const extended = engine.getSnapshot().rawPath;
-    expect(extended[4]!.x).toBe(8);
+    expect(extended[4]!.x).toBe(3);
     expect(extended[4]!.y).toBeCloseTo(0, 12);
     expect(extended[4]!.t).toBe(400);
-    expect(extended[5]!.x).toBe(8.5);
+    expect(extended[5]!.x).toBe(3.5);
     expect(extended[5]!.y).toBeCloseTo(0, 12);
     expect(extended[5]!.t).toBe(500);
   });

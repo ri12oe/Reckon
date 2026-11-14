@@ -54,20 +54,44 @@ describe('estimateStepLength', () => {
     [20, 28, 0.7142857142857143],
     [65, 100, 0.65],
     [0.5, 1, 0.5],
-    [100, 1, 100],
+    [0.3, 1, 0.3],
+    [1.2, 1, 1.2],
   ])('%s m over %s steps is %s m/step', (distanceM, stepCount, stepLengthM) => {
     const estimate = estimateStepLength({ distanceM, stepCount });
     expect(estimate).toEqual({ stepLengthM, distanceM, stepCount });
     expect(estimate!.stepLengthM * stepCount).toBe(distanceM);
   });
 
-  test('a tiny positive ratio is kept; underflow to 0 is not an estimate', () => {
+  test('a ratio outside 0.3 to 1.2 m is pulled into that band before integration', () => {
+    expect(estimateStepLength({ distanceM: 100, stepCount: 1 })).toEqual({
+      stepLengthM: 1.2,
+      distanceM: 100,
+      stepCount: 1,
+    });
+    expect(estimateStepLength({ distanceM: 1e6, stepCount: 1 })).toEqual({
+      stepLengthM: 1.2,
+      distanceM: 1e6,
+      stepCount: 1,
+    });
+    expect(estimateStepLength({ distanceM: 0.2, stepCount: 1 })).toEqual({
+      stepLengthM: 0.3,
+      distanceM: 0.2,
+      stepCount: 1,
+    });
     expect(estimateStepLength({ distanceM: Number.MIN_VALUE, stepCount: 1 })).toEqual({
-      stepLengthM: Number.MIN_VALUE,
+      stepLengthM: 0.3,
       distanceM: Number.MIN_VALUE,
       stepCount: 1,
     });
     expect(estimateStepLength({ distanceM: Number.MIN_VALUE, stepCount: 2 })).toBeNull();
+
+    const huge = estimateStepLength({ distanceM: 1e6, stepCount: 1 });
+    const path = integratePath([{ t: 1 }], 90, { stepLength: huge!.stepLengthM });
+    expect(path).toHaveLength(2);
+    expect(path[1]!.x).toBeCloseTo(1.2, 12);
+    expect(path[1]!.y).toBeCloseTo(0, 12);
+    expect(Number.isFinite(path[1]!.x)).toBe(true);
+    expect(Number.isFinite(path[1]!.y)).toBe(true);
   });
 
   test.each([
