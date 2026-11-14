@@ -1004,12 +1004,12 @@ function wrap180(deg: number): number {
 }
 
 describe('getEngine', () => {
-  test('serves the demo snapshot until a sample; mockEngine keeps the static walk', () => {
+  test('serves an empty path until a sample; mockEngine keeps the static walk', () => {
     const snapshot = getEngine().getSnapshot();
-    expect(snapshot.heading).toBe(90);
-    expect(snapshot.stepCount).toBe(12);
-    expect(snapshot.rawPath).toHaveLength(7);
-    expect(snapshot).toEqual(mockEngine.getSnapshot());
+    expect(Number.isFinite(snapshot.heading)).toBe(false);
+    expect(snapshot.stepCount).toBe(0);
+    expect(snapshot.rawPath).toEqual([]);
+    expect(snapshot).not.toEqual(mockEngine.getSnapshot());
 
     const mock = mockEngine.getSnapshot();
     expect(mock.heading).toBe(90);

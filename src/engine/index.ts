@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 import { calibrationDatabaseOpen, readStepLength } from '@/db/calibration';
 import {
   createLiveEngine,
@@ -7,6 +9,7 @@ import {
 } from '@/engine/live-engine';
 import { mockEngine } from '@/engine/mock-engine';
 import type { SensorStartResult, StartSensorFeedOptions } from '@/engine/sensor-feed';
+import type { EngineSnapshot } from '@/engine/types';
 
 let liveEngine: LiveFloorwalkerEngine | null = null;
 let bootedWithDatabase = false;
@@ -16,10 +19,21 @@ function storedStepLengthM(): number | undefined {
   return readStepLength()?.stepLengthM;
 }
 
+function blankSnapshot(): EngineSnapshot {
+  return {
+    rawPath: [],
+    correctedPath: [],
+    stepCount: 0,
+    heading: Number.NaN,
+    pins: [],
+    pitchPaused: false,
+  };
+}
+
 function bootConfig(): LiveEngineConfig {
   const stepLengthM = storedStepLengthM();
   return {
-    emptySnapshot: mockEngine.getSnapshot(),
+    emptySnapshot: Platform.OS === 'web' ? mockEngine.getSnapshot() : blankSnapshot(),
     drift: { corridor: true },
     ...(stepLengthM !== undefined ? { stepLengthM } : {}),
     readStepLengthM: storedStepLengthM,

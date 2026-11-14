@@ -985,7 +985,14 @@ describe('getEngine', () => {
     expect(typeof engine.startSensors).toBe('function');
     expect(typeof engine.stopSensors).toBe('function');
     expect(engine.sensorsActive()).toBe(false);
-    expect(engine.getSnapshot()).toEqual(mockEngine.getSnapshot());
+    expect(engine.getSnapshot()).toEqual({
+      rawPath: [],
+      correctedPath: [],
+      stepCount: 0,
+      heading: Number.NaN,
+      pins: [],
+      pitchPaused: false,
+    });
     expect(engine.getSnapshot()).not.toBe(mockEngine.getSnapshot());
     expect(mockEngine.getSnapshot().stepCount).toBe(12);
     expect(mockEngine.getSnapshot().heading).toBe(90);
@@ -994,13 +1001,14 @@ describe('getEngine', () => {
     expect(mockEngine.getSnapshot().pins.map((pin) => pin.id)).toEqual(['door', 'desk']);
   });
 
-  test('startSensors and stopSensors follow getEngine and leave the demo untouched', async () => {
+  test('startSensors and stopSensors follow getEngine and leave the blank snapshot untouched', async () => {
     const sensors = motionSensors();
     expect(getEngine().sensorsActive()).toBe(false);
     await startSensors({ sensors });
     expect(getEngine().sensorsActive()).toBe(true);
     expect(sensors.Accelerometer.addListener).toHaveBeenCalledTimes(1);
-    expect(getEngine().getSnapshot()).toEqual(mockEngine.getSnapshot());
+    expect(getEngine().getSnapshot().rawPath).toEqual([]);
+    expect(Number.isFinite(getEngine().getSnapshot().heading)).toBe(false);
     expect(getEngine().snapshotForSave()).toEqual({
       rawPath: [{ x: 0, y: 0, t: 0 }],
       correctedPath: [{ x: 0, y: 0, t: 0 }],
@@ -1009,13 +1017,14 @@ describe('getEngine', () => {
       pins: [],
       pitchPaused: false,
     });
-    expect(getEngine().getSnapshot().stepCount).toBe(12);
+    expect(getEngine().getSnapshot().stepCount).toBe(0);
 
     stopSensors();
     expect(getEngine().sensorsActive()).toBe(false);
     const remove = sensors.Accelerometer.addListener.mock.results[0]!.value.remove as jest.Mock;
     expect(remove).toHaveBeenCalledTimes(1);
     sensors.Accelerometer.emit({ x: 0, y: 0, z: 2, timestamp: 1 });
-    expect(getEngine().getSnapshot().stepCount).toBe(12);
+    expect(getEngine().getSnapshot().stepCount).toBe(0);
+    expect(getEngine().getSnapshot().rawPath).toEqual([]);
   });
 });

@@ -24,7 +24,6 @@
  *
  * `emptySnapshot`, when set, is what `getSnapshot` returns until the first
  * finite accel, gyro, mag, step, or heading sample. `reset()` arms it again.
- * The shared engine uses that for the static demo walk.
  * `EngineSnapshot.heading` is the course: the latest fused heading, else
  * the latest pushed heading, else the latest step heading, else the
  * configured initial heading (0°). `gyroOnly` is set with a fused heading.
@@ -110,11 +109,7 @@ export type LiveEngineConfig = {
   originY?: number;
   /** Origin timestamp, milliseconds. */
   originT?: number;
-  /**
-   * Served by `getSnapshot` until the first finite sample.
-   * The shared engine passes the static demo so screens keep that walk
-   * until a sensor actually delivers data.
-   */
+  /** Served by `getSnapshot` until the first finite sample. */
   emptySnapshot?: EngineSnapshot;
 };
 
