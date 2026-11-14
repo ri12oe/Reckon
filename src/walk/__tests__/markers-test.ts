@@ -29,7 +29,8 @@ describe('headingCone', () => {
     expect(path.endsWith('Z')).toBe(true);
   });
 
-  test('a missing heading points north', () => {
-    expect(headingCone(center, NaN)).toBe(headingCone(center, 0));
+  test('a missing heading draws no wedge', () => {
+    expect(headingCone(center, NaN)).toBe('');
+    expect(headingCone(center, Number.POSITIVE_INFINITY)).toBe('');
   });
 });

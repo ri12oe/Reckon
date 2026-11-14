@@ -7,6 +7,7 @@ import {
 } from '@/engine';
 
 import { sensorStartFaultMessage, walkPill } from '@/sensor-start';
+import { formatHeading } from '@/walk/stats';
 
 const FAULTS: SensorStartFault[] = ['permission', 'unavailable', 'error'];
 
@@ -27,43 +28,122 @@ describe('sensorStartFaultMessage', () => {
   });
 });
 
+function levelWalk(
+  patch: {
+    heading?: number;
+    pitchPaused?: boolean;
+    sensorStartFailed?: SensorStartFault;
+    isCannedDemo?: true;
+  } = {},
+) {
+  return { heading: 12, pitchPaused: false, ...patch };
+}
+
 describe('walkPill', () => {
   test('a saved floor stays Saved floor when a start fault is also set', () => {
-    expect(walkPill(true, 'permission', false)).toEqual({ label: 'Saved floor', live: false });
-    expect(walkPill(true, undefined, false)).toEqual({ label: 'Saved floor', live: false });
+    expect(walkPill(true, levelWalk({ sensorStartFailed: 'permission' }))).toEqual({
+      label: 'Saved floor',
+      live: false,
+    });
+    expect(walkPill(true, levelWalk())).toEqual({ label: 'Saved floor', live: false });
   });
 
   test('a saved floor stays Saved floor while the phone is tilted', () => {
-    expect(walkPill(true, undefined, true)).toEqual({ label: 'Saved floor', live: false });
-    expect(walkPill(true, 'permission', true)).toEqual({ label: 'Saved floor', live: false });
+    expect(walkPill(true, levelWalk({ pitchPaused: true }))).toEqual({
+      label: 'Saved floor',
+      live: false,
+    });
+    expect(
+      walkPill(true, levelWalk({ sensorStartFailed: 'permission', pitchPaused: true })),
+    ).toEqual({ label: 'Saved floor', live: false });
   });
 
   test('a fault with no saved floor is not a healthy Live session', () => {
     for (const fault of FAULTS) {
-      const pill = walkPill(false, fault, false);
+      const pill = walkPill(false, levelWalk({ sensorStartFailed: fault }));
       expect(pill.live).toBe(false);
       expect(pill.label).toBe(sensorStartFaultMessage({ ok: false, reason: fault }));
       expect(pill.label).not.toBe('Live');
-      expect(walkPill(false, fault, true).label).toBe(pill.label);
+      expect(
+        walkPill(false, levelWalk({ sensorStartFailed: fault, pitchPaused: true })).label,
+      ).toBe(pill.label);
     }
   });
 
   test('a live walk reads Live when the phone is level and the tilt pause when it is not', () => {
-    expect(walkPill(false, undefined, false)).toEqual({ label: 'Live', live: true });
-    expect(walkPill(false, undefined, true)).toEqual({
+    expect(walkPill(false, levelWalk())).toEqual({ label: 'Live', live: true });
+    expect(walkPill(false, levelWalk({ heading: 0 }))).toEqual({ label: 'Live', live: true });
+    expect(walkPill(false, levelWalk({ pitchPaused: true }))).toEqual({
       label: 'Paused, hold it level',
       live: false,
     });
-    expect(walkPill(false, undefined, false)).toEqual({ label: 'Live', live: true });
+    expect(walkPill(false, levelWalk())).toEqual({ label: 'Live', live: true });
   });
 
-  test('the canned demo stays Live', () => {
+  test('the canned demo is not Live', () => {
     const demo = mockEngine.getSnapshot();
     expect(demo.isCannedDemo).toBe(true);
     expect(demo.pitchPaused).toBe(false);
-    expect(walkPill(false, demo.sensorStartFailed, demo.pitchPaused)).toEqual({
-      label: 'Live',
-      live: true,
+    expect(Number.isFinite(demo.heading)).toBe(true);
+    expect(walkPill(false, demo)).toEqual({ label: 'Demo walk', live: false });
+    expect(formatHeading(demo.heading)).toBe('90° E');
+    expect(walkPill(false, { ...demo, heading: Number.NaN })).toEqual({
+      label: 'Demo walk',
+      live: false,
+    });
+  });
+
+  test('saved floor, a sensor fault, and a tilt pause still win over the demo', () => {
+    const demo = mockEngine.getSnapshot();
+    expect(walkPill(true, demo)).toEqual({ label: 'Saved floor', live: false });
+    expect(walkPill(false, { ...demo, sensorStartFailed: 'permission' })).toEqual({
+      label: 'motion permission needed',
+      live: false,
+    });
+    expect(walkPill(false, { ...demo, pitchPaused: true })).toEqual({
+      label: 'Paused, hold it level',
+      live: false,
+    });
+  });
+
+  test('a heading that is not a number is not Live and prints an em dash', () => {
+    const engine = createLiveEngine({
+      emptySnapshot: {
+        rawPath: [],
+        correctedPath: [],
+        stepCount: 0,
+        heading: Number.NaN,
+        pins: [],
+        pitchPaused: false,
+      },
+    });
+    const before = engine.getSnapshot();
+    expect(before.isCannedDemo).toBeUndefined();
+    expect(Number.isFinite(before.heading)).toBe(false);
+    expect(walkPill(false, before)).toEqual({ label: 'No heading yet', live: false });
+    expect(formatHeading(before.heading)).toBe('—');
+    expect(formatHeading(before.heading)).not.toBe('0° N');
+    expect(walkPill(false, levelWalk({ heading: Number.POSITIVE_INFINITY }))).toEqual({
+      label: 'No heading yet',
+      live: false,
+    });
+    expect(formatHeading(Number.POSITIVE_INFINITY)).toBe('—');
+  });
+
+  test('saved floor, a sensor fault, and a tilt pause still win over a missing heading', () => {
+    const waiting = levelWalk({
+      heading: Number.NaN,
+      sensorStartFailed: 'unavailable',
+      pitchPaused: true,
+    });
+    expect(walkPill(true, waiting)).toEqual({ label: 'Saved floor', live: false });
+    expect(walkPill(false, waiting)).toEqual({
+      label: 'motion sensors unavailable',
+      live: false,
+    });
+    expect(walkPill(false, levelWalk({ heading: Number.NaN, pitchPaused: true }))).toEqual({
+      label: 'Paused, hold it level',
+      live: false,
     });
   });
 });
@@ -91,7 +171,7 @@ describe('walk pill and a real start', () => {
     const started = await engine.startSensors({ sensors: motionSensors(false) });
     expect(started).toEqual({ ok: false, reason: 'permission' });
     const denied = engine.getSnapshot();
-    expect(walkPill(false, denied.sensorStartFailed, denied.pitchPaused)).toEqual({
+    expect(walkPill(false, denied)).toEqual({
       label: 'motion permission needed',
       live: false,
     });
@@ -111,7 +191,7 @@ describe('walk pill and a real start', () => {
       pitchPaused: false,
     });
     const recalled = engine.getSnapshot();
-    expect(walkPill(true, recalled.sensorStartFailed, recalled.pitchPaused)).toEqual({
+    expect(walkPill(true, recalled)).toEqual({
       label: 'Saved floor',
       live: false,
     });
@@ -122,13 +202,13 @@ describe('walk pill and a real start', () => {
     expect(after.stepCount).toBe(0);
     expect(after.sensorStartFailed).toBe('permission');
     expect(engine.sensorsActive()).toBe(false);
-    expect(walkPill(false, after.sensorStartFailed, after.pitchPaused)).toEqual({
+    expect(walkPill(false, after)).toEqual({
       label: 'motion permission needed',
       live: false,
     });
     engine.stopSensors();
     const cleared = engine.getSnapshot();
-    expect(walkPill(false, cleared.sensorStartFailed, cleared.pitchPaused)).toEqual({
+    expect(walkPill(false, cleared)).toEqual({
       label: 'Live',
       live: true,
     });
@@ -160,7 +240,7 @@ describe('walk pill and a real start', () => {
     expect(sensorStartFaultMessage(started)).toBeNull();
     const shown = engine.getSnapshot();
     expect(shown.sensorStartFailed).toBeUndefined();
-    expect(walkPill(false, shown.sensorStartFailed, shown.pitchPaused)).toEqual({
+    expect(walkPill(false, shown)).toEqual({
       label: 'Live',
       live: true,
     });

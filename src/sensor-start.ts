@@ -1,4 +1,4 @@
-import type { SensorStartFault, SensorStartResult } from '@/engine';
+import type { EngineSnapshot, SensorStartFault, SensorStartResult } from '@/engine';
 
 const FAULT_COPY: Record<SensorStartFault, string> = {
   permission: 'motion permission needed',
@@ -16,13 +16,18 @@ export function sensorStartFaultMessage(result: SensorStartResult): string | nul
   return FAULT_COPY[result.reason];
 }
 
-export function walkPill(
-  savedFloor: boolean,
-  fault: SensorStartFault | undefined,
-  pitchPaused: boolean,
-): WalkPill {
+type WalkPillSnapshot = Pick<
+  EngineSnapshot,
+  'heading' | 'pitchPaused' | 'sensorStartFailed' | 'isCannedDemo'
+>;
+
+export function walkPill(savedFloor: boolean, snapshot: WalkPillSnapshot): WalkPill {
   if (savedFloor) return { label: 'Saved floor', live: false };
-  if (fault) return { label: FAULT_COPY[fault], live: false };
-  if (pitchPaused) return { label: 'Paused, hold it level', live: false };
+  if (snapshot.sensorStartFailed) {
+    return { label: FAULT_COPY[snapshot.sensorStartFailed], live: false };
+  }
+  if (snapshot.pitchPaused) return { label: 'Paused, hold it level', live: false };
+  if (snapshot.isCannedDemo) return { label: 'Demo walk', live: false };
+  if (!Number.isFinite(snapshot.heading)) return { label: 'No heading yet', live: false };
   return { label: 'Live', live: true };
 }
