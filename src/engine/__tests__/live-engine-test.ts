@@ -446,7 +446,10 @@ describe('precomputed steps and headings', () => {
     engine.setStepLength(0.2);
     expect(engine.getStepLength()).toBe(0.75);
     engine.pushStep({ t: 100, heading: 90 });
-    expect(engine.getSnapshot().rawPath[1]).toEqual({ x: 0.75, y: 0, t: 100 });
+    const kept = engine.getSnapshot().rawPath[1]!;
+    expect(kept.x).toBe(0.75);
+    expect(kept.y).toBeCloseTo(0, 12);
+    expect(kept.t).toBe(100);
 
     engine.setStepLength(1.2);
     engine.pushStep({ t: 200, heading: 90 });

@@ -119,6 +119,7 @@ export {
 export type { HeadingSample, PathIntegrationConfig, PathStep } from '@/engine/path-integration';
 
 export {
+  acceptedStepLengthM,
   countCalibrationSteps,
   estimateStepLength,
   estimateStepLengthFromSteps,

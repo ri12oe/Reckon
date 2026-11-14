@@ -20,6 +20,16 @@ export const MIN_STEP_LENGTH_M = 0.3;
 
 export const MAX_STEP_LENGTH_M = 1.2;
 
+/**
+ * Meters per step when the value may be walked.
+ * A length outside 0.3 to 1.2 m is not stored and does not replace the current stride.
+ */
+export function acceptedStepLengthM(stepLengthM: number): number | null {
+  if (!Number.isFinite(stepLengthM)) return null;
+  if (stepLengthM < MIN_STEP_LENGTH_M || stepLengthM > MAX_STEP_LENGTH_M) return null;
+  return stepLengthM;
+}
+
 export type CalibrationWalk = {
   /** Measured course length, meters. Finite and greater than 0. */
   distanceM: number;

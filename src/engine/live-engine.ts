@@ -76,6 +76,7 @@ import {
   type StepSample,
 } from '@/engine/step-detector';
 import {
+  acceptedStepLengthM,
   countCalibrationSteps,
   estimateStepLength,
   type StepLengthEstimate,
@@ -141,7 +142,8 @@ export type LiveFloorwalkerEngine = FloorwalkerEngine & {
   pushHeading(sample: HeadingSample): void;
   /**
    * Meters per step for steps taken after this call.
-   * Steps already taken stay where they are. Ignored when `stepLengthM` is not finite.
+   * Steps already taken stay where they are.
+   * Ignored when `stepLengthM` is not finite or is outside 0.3 to 1.2 m.
    */
   setStepLength(stepLengthM: number): void;
   /**
@@ -471,10 +473,11 @@ export function createLiveEngine(config?: LiveEngineConfig): LiveFloorwalkerEngi
       touch();
     },
     setStepLength(next) {
-      if (!Number.isFinite(next) || next === stepLengthM) return;
+      const accepted = acceptedStepLengthM(next);
+      if (accepted === null || accepted === stepLengthM) return;
       const steps = currentSteps();
       takenLengths = stepLengthsFor(finiteSteps(steps), takenLengths, stepLengthM);
-      stepLengthM = next;
+      stepLengthM = accepted;
       touch();
     },
     calibrateStepLength(distanceM, stepCount) {
