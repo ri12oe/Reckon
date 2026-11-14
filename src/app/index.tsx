@@ -10,13 +10,7 @@ import SkiaWalk from '@/components/skia-walk';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { getActiveFloor, resumeLiveWalk, type ActiveFloor } from '@/db/session';
-import {
-  getEngine,
-  mockEngine,
-  type EngineSnapshot,
-  type LiveFloorwalkerEngine,
-  type SensorStartFault,
-} from '@/engine';
+import { getEngine, mockEngine, type EngineSnapshot, type LiveFloorwalkerEngine } from '@/engine';
 import { lightHaptic } from '@/haptics';
 import { useTheme } from '@/hooks/use-theme';
 import { walkPill } from '@/sensor-start';
@@ -127,7 +121,6 @@ export default function WalkScreen() {
     landmarkRef.current = newLandmark(landmarkRef.current);
   };
 
-  const heading = Number.isFinite(snapshot.heading) ? snapshot.heading : 0;
   const readout = walkReadout(snapshot);
 
   const resume = () => {
@@ -145,13 +138,7 @@ export default function WalkScreen() {
     <Screen
       title="Walk"
       subtitle={active ? `${active.buildingName} · ${active.name}` : 'Live walk'}
-      headerRight={
-        <StatusPill
-          savedFloor={active !== null}
-          fault={snapshot.sensorStartFailed}
-          pitchPaused={snapshot.pitchPaused}
-        />
-      }
+      headerRight={<StatusPill savedFloor={active !== null} snapshot={snapshot} />}
       background={<GridBackground />}
     >
       <Glass style={styles.readout}>
@@ -161,7 +148,7 @@ export default function WalkScreen() {
         <View style={[styles.divider, { backgroundColor: theme.glassBorder }]} />
         <Metric
           label="Heading"
-          value={formatHeading(heading)}
+          value={formatHeading(snapshot.heading)}
           dim={headingIsGyroOnly(snapshot.gyroOnly)}
         />
       </Glass>
@@ -226,17 +213,9 @@ export default function WalkScreen() {
   );
 }
 
-function StatusPill({
-  savedFloor,
-  fault,
-  pitchPaused,
-}: {
-  savedFloor: boolean;
-  fault: SensorStartFault | undefined;
-  pitchPaused: boolean;
-}) {
+function StatusPill({ savedFloor, snapshot }: { savedFloor: boolean; snapshot: EngineSnapshot }) {
   const theme = useTheme();
-  const pill = walkPill(savedFloor, fault, pitchPaused);
+  const pill = walkPill(savedFloor, snapshot);
   return (
     <Glass style={styles.pill}>
       <View

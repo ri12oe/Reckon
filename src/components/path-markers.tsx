@@ -33,7 +33,9 @@ export function PathMarkers({ start, end, heading, scale = 1 }: Props) {
       ) : null}
       {end ? (
         <>
-          <Path path={headingCone(end, heading, 36 * k)} color={withAlpha(theme.accent, 0.3)} />
+          {Number.isFinite(heading) ? (
+            <Path path={headingCone(end, heading, 36 * k)} color={withAlpha(theme.accent, 0.3)} />
+          ) : null}
           <Circle cx={end.x} cy={end.y} r={22 * k} color={withAlpha(theme.accent, 0.18)} />
           <Circle cx={end.x} cy={end.y} r={10 * k} color="#ffffff" />
           <Circle cx={end.x} cy={end.y} r={7 * k} color={theme.accent} />

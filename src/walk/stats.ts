@@ -30,7 +30,8 @@ export function compassPoint(heading: number): (typeof DIRECTIONS)[number] {
 }
 
 export function formatHeading(heading: number): string {
-  const degrees = Number.isFinite(heading) ? Math.round(((heading % 360) + 360) % 360) : 0;
+  if (!Number.isFinite(heading)) return '—';
+  const degrees = Math.round(((heading % 360) + 360) % 360);
   return `${degrees % 360}° ${compassPoint(heading)}`;
 }
 

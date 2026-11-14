@@ -50,7 +50,13 @@ describe('compass headings', () => {
     expect(formatHeading(60.4)).toBe('60° NE');
     expect(formatHeading(-90)).toBe('270° W');
     expect(formatHeading(359.7)).toBe('0° N');
-    expect(formatHeading(NaN)).toBe('0° N');
+    expect(formatHeading(0)).toBe('0° N');
+  });
+
+  test('an unknown heading prints an em dash', () => {
+    expect(formatHeading(NaN)).toBe('—');
+    expect(formatHeading(Number.POSITIVE_INFINITY)).toBe('—');
+    expect(formatHeading(Number.NEGATIVE_INFINITY)).toBe('—');
   });
 
   test('only fused gyro propagation dims the heading', () => {
