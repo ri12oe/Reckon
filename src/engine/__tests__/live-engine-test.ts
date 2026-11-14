@@ -557,6 +557,7 @@ describe('precomputed steps and headings', () => {
       stepLengthM: 1.2,
       distanceM: 15,
       stepCount: 10,
+      clamped: true,
     });
     expect(dividedByTen.getSnapshot().rawPath[20]!.x).toBeCloseTo(24, 12);
     expect(dividedByTen.getStepLength()).toBe(1.2);

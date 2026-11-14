@@ -47,6 +47,7 @@ export type StepLengthEstimate = {
   distanceM: number;
   /** Step count that produced this estimate. */
   stepCount: number;
+  clamped?: true;
 };
 
 /**
@@ -62,7 +63,8 @@ export function estimateStepLength(walk: CalibrationWalk): StepLengthEstimate | 
   if (!Number.isFinite(ratio) || ratio <= 0) return null;
 
   const stepLengthM = Math.min(MAX_STEP_LENGTH_M, Math.max(MIN_STEP_LENGTH_M, ratio));
-  return { stepLengthM, distanceM, stepCount };
+  if (stepLengthM === ratio) return { stepLengthM, distanceM, stepCount };
+  return { stepLengthM, distanceM, stepCount, clamped: true };
 }
 
 /**

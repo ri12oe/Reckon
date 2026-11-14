@@ -67,21 +67,25 @@ describe('estimateStepLength', () => {
       stepLengthM: 1.2,
       distanceM: 100,
       stepCount: 1,
+      clamped: true,
     });
     expect(estimateStepLength({ distanceM: 1e6, stepCount: 1 })).toEqual({
       stepLengthM: 1.2,
       distanceM: 1e6,
       stepCount: 1,
+      clamped: true,
     });
     expect(estimateStepLength({ distanceM: 0.2, stepCount: 1 })).toEqual({
       stepLengthM: 0.3,
       distanceM: 0.2,
       stepCount: 1,
+      clamped: true,
     });
     expect(estimateStepLength({ distanceM: Number.MIN_VALUE, stepCount: 1 })).toEqual({
       stepLengthM: 0.3,
       distanceM: Number.MIN_VALUE,
       stepCount: 1,
+      clamped: true,
     });
     expect(estimateStepLength({ distanceM: Number.MIN_VALUE, stepCount: 2 })).toBeNull();
 
@@ -92,6 +96,27 @@ describe('estimateStepLength', () => {
     expect(path[1]!.y).toBeCloseTo(0, 12);
     expect(Number.isFinite(path[1]!.x)).toBe(true);
     expect(Number.isFinite(path[1]!.y)).toBe(true);
+  });
+
+  test('15 m over 10 steps keeps the 1.2 m cap and marks it clamped', () => {
+    const before = { stepLengthM: 1.2, distanceM: 15, stepCount: 10 };
+    expect(estimateStepLength({ distanceM: 15, stepCount: 10 })).toEqual({
+      ...before,
+      clamped: true,
+    });
+  });
+
+  test('2 m over 10 steps keeps the 0.3 m floor and marks it clamped', () => {
+    const before = { stepLengthM: 0.3, distanceM: 2, stepCount: 10 };
+    expect(estimateStepLength({ distanceM: 2, stepCount: 10 })).toEqual({
+      ...before,
+      clamped: true,
+    });
+  });
+
+  test('7.5 m over 10 steps stays 0.75 m/step and is not marked clamped', () => {
+    const before = { stepLengthM: 0.75, distanceM: 7.5, stepCount: 10 };
+    expect(estimateStepLength({ distanceM: 7.5, stepCount: 10 })).toEqual(before);
   });
 
   test.each([
