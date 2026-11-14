@@ -491,10 +491,18 @@ describe('tilt gate', () => {
     const turnYaw = (t: number) => (t >= 11200 && t < 12200 ? Math.PI / 2 : 0);
     play(11020, 12800, 0, still, turnYaw, turnHeading);
     const turned = engine.getSnapshot();
-    expect(resumed.gyroOnly).toBe(true);
-    expect(resumed.heading).toBeCloseTo(0, 4);
+    expect(resumed.gyroOnly).toBe(false);
+    expect(resumed.heading).toBeCloseTo(88.3937, 3);
+    const east = resumed.rawPath.slice(4);
+    expect(east.map((point) => point.t)).toEqual([9500, 10000, 10500]);
+    expect(east[0]!.x).toBeCloseTo(0.9962, 3);
+    expect(east[0]!.y).toBeCloseTo(3.0873, 3);
+    expect(east[1]!.x).toBeCloseTo(1.9943, 3);
+    expect(east[1]!.y).toBeCloseTo(3.1479, 3);
+    expect(east[2]!.x).toBeCloseTo(2.9935, 3);
+    expect(east[2]!.y).toBeCloseTo(3.1894, 3);
     expect(turned.gyroOnly).toBe(false);
-    expect(turned.heading).toBeCloseTo(180, 3);
+    expect(turned.heading).toBeCloseTo(179.7331, 3);
 
     console.log(
       JSON.stringify({

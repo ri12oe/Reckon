@@ -841,6 +841,29 @@ describe('fuseHeading', () => {
     });
   });
 
+  test('a 4 s tilt gap then a steady 90° compass trusts east at 6620 ms', () => {
+    const before = clock(0, 2200);
+    const after = clock(6220, 8000);
+    const fused = fuseHeading(
+      [...gyroAt(before, 0), { t: 2220, brake: true }, ...gyroAt(after, 0)],
+      [...magAt(before, () => field(0)), ...magAt(after, () => field(90))],
+    );
+
+    expect(at(fused, 400)).toMatchObject({ heading: 0, gyroOnly: false, interference: false });
+    expect(at(fused, 6600)).toMatchObject({
+      heading: 0,
+      magneticHeading: 90,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 6620).heading).toBeCloseTo(90, 4);
+    expect(at(fused, 6620)).toMatchObject({
+      magneticHeading: 90,
+      gyroOnly: false,
+      interference: false,
+    });
+  });
+
   test('a tilt brake holds the heading; a measured 0 rad/s integrates minus the bias', () => {
     const times = clock(0, 10000);
     const gyro = gyroAt(times, 3);

@@ -12,9 +12,10 @@
  *    A clean, stable window of `recoverHoldMs` resumes the blend when
  *    the compass is within `reacquireMaxDeg` of the gyro heading and
  *    the compass change since the last trusted fix matches integrated yaw.
- *    A longer disagreement snaps on that same match. Samples that turn
- *    with the gyro do not restart the stretch. One bad sample does not
- *    either.
+ *    A gap that did not integrate yaw leaves nothing to match, so that
+ *    same short window copies the compass. A longer disagreement snaps
+ *    on the yaw match. Samples that turn with the gyro do not restart
+ *    the stretch. One bad sample does not either.
  *
  * The first fix uses that same window and the same yaw match.
  *
@@ -379,6 +380,11 @@ function applyMagnetometer(
   const sudden = isJump(state, magneticHeading, config) && innovationAbs > config.jumpThresholdDeg;
   const disagrees = innovationAbs > config.reacquireMaxDeg;
   const ready = recoveryReady(state.recentMag, state.baselineUt, config);
+  if (ready && state.voidBias) {
+    acquire(state, t, magneticHeading, magnitudeUt);
+    return { magneticHeading, magnitudeUt };
+  }
+
   const yawExplains =
     state.lastMagHeading !== null &&
     motionAgrees(
