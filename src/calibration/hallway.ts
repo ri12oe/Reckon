@@ -46,7 +46,10 @@ export function createHallwayCalibration(deps: {
           saved: null,
         };
       }
-      return { session: ended, status: '', saved };
+      const status = estimate?.clamped
+        ? `Step length capped at ${saved.stepLengthM} m. Check the distance or step count.`
+        : '';
+      return { session: ended, status, saved };
     },
   };
 }

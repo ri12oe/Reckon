@@ -113,6 +113,7 @@ describe('calibration session', () => {
       stepLengthM: 1.2,
       distanceM: 15,
       stepCount: 10,
+      clamped: true,
     });
   });
 

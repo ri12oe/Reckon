@@ -140,4 +140,37 @@ describe('hallway calibration', () => {
     expect(isCalibrated()).toBe(false);
     expect(live.getStepLength()).toBe(0.75);
   });
+
+  test('15 m over 10 steps still saves 1.2 m, then says the length was capped', () => {
+    const { live, run } = openRun(15);
+    const ended = run.end(run.poll(beginCalibration(idle), 10), 10);
+    const before = { stepLengthM: 1.2, distanceM: 15, stepCount: 10 };
+    expect(ended.session).toEqual({ phase: 'done', steps: 10 });
+    expect(ended.saved).toEqual(before);
+    expect(readStepLength()).toEqual(before);
+    expect(live.getStepLength()).toBe(1.2);
+    expect(ended.status).toBe('Step length capped at 1.2 m. Check the distance or step count.');
+  });
+
+  test('2 m over 10 steps still saves 0.3 m, then says the length was capped', () => {
+    const { live, run } = openRun(2);
+    const ended = run.end(run.poll(beginCalibration(idle), 10), 10);
+    const before = { stepLengthM: 0.3, distanceM: 2, stepCount: 10 };
+    expect(ended.session).toEqual({ phase: 'done', steps: 10 });
+    expect(ended.saved).toEqual(before);
+    expect(readStepLength()).toEqual(before);
+    expect(live.getStepLength()).toBe(0.3);
+    expect(ended.status).toBe('Step length capped at 0.3 m. Check the distance or step count.');
+  });
+
+  test('7.5 m over 10 steps still saves 0.75 m and stays quiet', () => {
+    const { live, run } = openRun(7.5);
+    const ended = run.end(run.poll(beginCalibration(idle), 10), 10);
+    const before = { stepLengthM: 0.75, distanceM: 7.5, stepCount: 10 };
+    expect(ended.session).toEqual({ phase: 'done', steps: 10 });
+    expect(ended.saved).toEqual(before);
+    expect(readStepLength()).toEqual(before);
+    expect(live.getStepLength()).toBe(0.75);
+    expect(ended.status).toBe('');
+  });
 });
