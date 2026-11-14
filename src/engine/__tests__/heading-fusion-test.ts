@@ -794,6 +794,127 @@ describe('fuseHeading', () => {
 
     expect(Math.abs(delta)).toBeLessThan(0.5);
   });
+
+  test('a 30°/s field with a still gyro stays at 0° and gyro-only (before: 12° and tracking at 400 ms, 15.2631° at 1 s)', () => {
+    const times = clock(0, 2000);
+    const fused = fuseHeading(
+      gyroAt(times, 0),
+      magAt(times, (t) => field(30 * (t / 1000))),
+    );
+
+    expect(at(fused, 0)).toMatchObject({ heading: 0, magneticHeading: 0, gyroOnly: true });
+    expect(at(fused, 400).heading).toBe(0);
+    expect(at(fused, 400).magneticHeading).toBeCloseTo(12, 4);
+    expect(at(fused, 400)).toMatchObject({ gyroOnly: true, interference: false });
+    expect(at(fused, 1000)).toMatchObject({
+      heading: 0,
+      gyroOnly: true,
+      interference: false,
+    });
+    expect(at(fused, 1000).magneticHeading).toBeCloseTo(30, 4);
+    expect(at(fused, 2000)).toMatchObject({ heading: 0, gyroOnly: true, interference: false });
+    expect(at(fused, 2000).magneticHeading).toBeCloseTo(60, 4);
+  });
+
+  test('a still north field still acquires 0° at 400 ms', () => {
+    const times = clock(0, 1000);
+    const fused = fuseHeading(
+      gyroAt(times, 0),
+      magAt(times, () => field(0)),
+    );
+
+    expect(at(fused, 380)).toMatchObject({ heading: 0, gyroOnly: true, interference: false });
+    expect(at(fused, 400)).toMatchObject({
+      heading: 0,
+      magneticHeading: 0,
+      gyroOnly: false,
+      interference: false,
+    });
+    expect(at(fused, 1000)).toMatchObject({ heading: 0, gyroOnly: false, interference: false });
+  });
+
+  test('a compass stuck at 90° while yaw is −30°/s stays at 210° after the gyro stops (before: snapped to 90° at 6.0 s)', () => {
+    const times = clock(0, 8000);
+    const fused = fuseHeading(
+      gyroAt(times, (t) => (t >= 1000 && t < 6000 ? -30 : 0)),
+      magAt(times, (t) => (t >= 1000 ? field(90) : field(0))),
+    );
+
+    expect(at(fused, 400)).toMatchObject({ heading: 0, gyroOnly: false, interference: false });
+    expect(at(fused, 5980).heading).toBeCloseTo(210.6, 4);
+    expect(at(fused, 5980)).toMatchObject({ gyroOnly: true, interference: true });
+    expect(at(fused, 6000).heading).toBeCloseTo(210, 4);
+    expect(at(fused, 6000)).toMatchObject({
+      magneticHeading: 90,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 8000).heading).toBeCloseTo(210, 4);
+    expect(at(fused, 8000)).toMatchObject({
+      magneticHeading: 90,
+      gyroOnly: true,
+      interference: true,
+    });
+  });
+
+  test('one 200 µT sample inside the 5 s window still snaps to north at 8.0 s (before: 11.02 s)', () => {
+    const times = clock(0, 8200);
+    const fused = fuseHeading(
+      gyroAt(times, (t) => (t >= 1000 && t < 3000 ? 45 : 0)),
+      magAt(times, (t) => {
+        if (t === 6000) return field(0, 4);
+        if (t >= 1000 && t < 3000) return field(0, 4);
+        return field(0);
+      }),
+    );
+
+    expect(at(fused, 6000).heading).toBeCloseTo(90, 4);
+    expect(at(fused, 6000)).toMatchObject({
+      magnitudeUt: 200,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 7980).heading).toBeCloseTo(90, 4);
+    expect(at(fused, 7980)).toMatchObject({
+      magneticHeading: 0,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 8000)).toMatchObject({
+      heading: 0,
+      magneticHeading: 0,
+      magnitudeUt: 50,
+      gyroOnly: false,
+      interference: false,
+    });
+  });
+
+  test('two 200 µT samples restart the 5 s window and snap to north at 11.04 s', () => {
+    const times = clock(0, 11200);
+    const fused = fuseHeading(
+      gyroAt(times, (t) => (t >= 1000 && t < 3000 ? 45 : 0)),
+      magAt(times, (t) => {
+        if (t === 6000 || t === 6020) return field(0, 4);
+        if (t >= 1000 && t < 3000) return field(0, 4);
+        return field(0);
+      }),
+    );
+
+    expect(at(fused, 8000).heading).toBeCloseTo(90, 4);
+    expect(at(fused, 8000)).toMatchObject({ gyroOnly: true, interference: true });
+    expect(at(fused, 11020).heading).toBeCloseTo(90, 4);
+    expect(at(fused, 11020)).toMatchObject({
+      magneticHeading: 0,
+      gyroOnly: true,
+      interference: true,
+    });
+    expect(at(fused, 11040)).toMatchObject({
+      heading: 0,
+      magneticHeading: 0,
+      gyroOnly: false,
+      interference: false,
+    });
+  });
 });
 
 function wrap180(deg: number): number {

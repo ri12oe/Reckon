@@ -11,13 +11,10 @@
  * 3. When the field is interfered, stop the blend and trust the gyro.
  *    A clean, stable window of `recoverHoldMs` resumes the blend when
  *    the compass is within `reacquireMaxDeg` of the gyro heading.
- *    A disagreement that stays within `FAR_STABLE_DEG` of one heading for
- *    `LONG_REACQUIRE_MS` snaps onto the compass. Later samples use the
- *    angle check again, and a later hold can snap too. Motion past
- *    `FAR_STABLE_DEG` restarts that window.
+ *    A longer disagreement snaps only when the compass change matches
+ *    integrated yaw. One bad sample does not restart that stretch.
  *
- * The first fix waits for the same clean, stable `recoverHoldMs` window.
- * It does not use the angle gate.
+ * The first fix uses that same window and the same yaw match.
  *
  * Device frame: +x forward, +y right, +z down, microtesla.
  * `yawRate` is radians per second, positive clockwise.
@@ -99,8 +96,6 @@ export type HeadingFusionConfig = {
   /**
    * A magnetometer heading farther than this from the gyro heading is not
    * trusted on the short recovery window. That window stays gyro-only.
-   * A longer clean disagreement snaps onto the compass, and a later
-   * hold can snap again.
    */
   reacquireMaxDeg: number;
   /** Milliseconds of clean, stable magnetometer samples required before a fix. */
@@ -180,16 +175,23 @@ type TimedEvent = YawEvent | MagEvent;
 
 type HeldYaw = { kind: 'brake' } | { kind: 'measured'; degPerSec: number };
 
+type HeadingAnchor = {
+  sinceMs: number;
+  compassDeg: number;
+  gyroDeg: number;
+};
+
 type Phase =
   | { kind: 'open' }
   | { kind: 'rejected' }
   | { kind: 'live' }
-  | { kind: 'held'; disagreeSinceMs: number | null; anchorDeg: number | null };
+  | { kind: 'held'; anchor: HeadingAnchor | null; unlevelStreak: number };
 
 type MagObs = {
   t: number;
   magnitudeUt: number;
   headingDeg: number | null;
+  yawHeadingDeg: number;
 };
 
 type FusionState = {
@@ -324,7 +326,8 @@ function applyMagnetometer(
   const magneticHeading = horizontal > 0 ? magneticHeadingDeg(mag.x, mag.y) : null;
   if (!mag.levelReady) {
     if (state.phase.kind === 'held') {
-      state.phase = { kind: 'held', disagreeSinceMs: null, anchorDeg: null };
+      const unlevelStreak = state.phase.unlevelStreak + 1;
+      state.phase = unlevelStreak >= 2 ? held(null) : held(state.phase.anchor, unlevelStreak);
     }
     return { magneticHeading, magnitudeUt };
   }
@@ -338,6 +341,7 @@ function applyMagnetometer(
     t,
     magnitudeUt,
     headingDeg: headingUsable ? magneticHeading : null,
+    yawHeadingDeg: state.heading,
   });
   while (
     state.recentMag.length > 0 &&
@@ -349,10 +353,8 @@ function applyMagnetometer(
   const magnitudeBad = magnitudeIsBad(magnitudeUt, state.baselineUt, config);
 
   if (!headingUsable) {
-    if (magnitudeBad) latch(state);
-    else if (state.phase.kind === 'held') {
-      state.phase = { kind: 'held', disagreeSinceMs: null, anchorDeg: null };
-    }
+    if (magnitudeBad && state.phase.kind !== 'held') latch(state);
+    if (state.phase.kind === 'held') keepOrClearAnchor(state, config);
     return { magneticHeading, magnitudeUt };
   }
 
@@ -361,7 +363,7 @@ function applyMagnetometer(
       state.phase = { kind: 'rejected' };
       return { magneticHeading, magnitudeUt };
     }
-    if (recoveryReady(state.recentMag, state.baselineUt, config)) {
+    if (recoveryReady(state.recentMag, state.baselineUt, config) && holdAgrees(state.recentMag)) {
       acquire(state, t, magneticHeading, magnitudeUt);
     }
     return { magneticHeading, magnitudeUt };
@@ -382,31 +384,16 @@ function applyMagnetometer(
   }
 
   if (state.phase.kind === 'live' && (magnitudeBad || sudden || disagrees)) {
-    state.phase = { kind: 'held', disagreeSinceMs: null, anchorDeg: null };
+    state.phase = held(null);
     state.rawYawAccumDeg = 0;
   }
 
-  if (state.phase.kind === 'held' && ready && disagrees) {
-    const oldest = state.recentMag[0];
-    let since = state.phase.disagreeSinceMs;
-    let anchor = state.phase.anchorDeg;
-    const drifted =
-      anchor === null || Math.abs(wrap180(magneticHeading - anchor)) > FAR_STABLE_DEG;
-    if (since === null || drifted) {
-      since = oldest?.t ?? t;
-      anchor = magneticHeading;
-    }
-    if (t - since >= LONG_REACQUIRE_MS) {
-      acquire(state, t, magneticHeading, magnitudeUt);
-      return { magneticHeading, magnitudeUt };
-    }
-    state.phase = { kind: 'held', disagreeSinceMs: since, anchorDeg: anchor };
+  if (state.phase.kind === 'held' && disagrees) {
+    trackDisagreement(state, t, magneticHeading, magnitudeUt, ready, config);
     return { magneticHeading, magnitudeUt };
   }
 
-  if (state.phase.kind === 'held') {
-    state.phase = { kind: 'held', disagreeSinceMs: null, anchorDeg: null };
-  }
+  if (state.phase.kind === 'held') keepOrClearAnchor(state, config);
 
   if (magnitudeBad || sudden || disagrees) {
     return { magneticHeading, magnitudeUt };
@@ -494,15 +481,98 @@ const MAX_BIAS_COMPASS_RATE_DEG_PER_SEC = 30;
 /** An observation above this is dropped, steady or not. */
 const MAX_BIAS_OBS_DEG_PER_SEC = 5;
 
-/**
- * Clean disagreement, measured from the oldest sample of the first ready
- * window, that snaps onto the compass when the residual is past
- * `reacquireMaxDeg`.
- */
 const LONG_REACQUIRE_MS = 5000;
 
-/** A sample farther than this from the anchor restarts the long window. */
 const FAR_STABLE_DEG = 10;
+
+const GYRO_AGREE_DEG = 10;
+
+function held(anchor: HeadingAnchor | null, unlevelStreak = 0): Phase {
+  return { kind: 'held', anchor, unlevelStreak };
+}
+
+function motionAgrees(compassDeltaDeg: number, gyroDeltaDeg: number): boolean {
+  return Math.abs(wrap180(compassDeltaDeg - gyroDeltaDeg)) <= GYRO_AGREE_DEG;
+}
+
+function holdAgrees(recentMag: readonly MagObs[]): boolean {
+  const first = recentMag[0];
+  const last = recentMag[recentMag.length - 1];
+  if (!first || !last || first.headingDeg === null || last.headingDeg === null) return false;
+  return motionAgrees(
+    wrap180(last.headingDeg - first.headingDeg),
+    wrap180(last.yawHeadingDeg - first.yawHeadingDeg),
+  );
+}
+
+function strayCount(
+  recentMag: readonly MagObs[],
+  anchor: HeadingAnchor,
+  baselineUt: number | null,
+  config: HeadingFusionConfig,
+): number {
+  let count = 0;
+  for (const obs of recentMag) {
+    if (obs.headingDeg === null || magnitudeIsBad(obs.magnitudeUt, baselineUt, config)) {
+      count += 1;
+      continue;
+    }
+    if (Math.abs(wrap180(obs.headingDeg - anchor.compassDeg)) > FAR_STABLE_DEG) count += 1;
+  }
+  return count;
+}
+
+function keptAnchor(state: FusionState, config: HeadingFusionConfig): HeadingAnchor | null {
+  if (state.phase.kind !== 'held' || state.phase.anchor === null) return null;
+  const anchor = state.phase.anchor;
+  if (strayCount(state.recentMag, anchor, state.baselineUt, config) >= 2) return null;
+  return anchor;
+}
+
+function trackDisagreement(
+  state: FusionState,
+  t: number,
+  magneticHeading: number,
+  magnitudeUt: number,
+  ready: boolean,
+  config: HeadingFusionConfig,
+): void {
+  if (state.phase.kind !== 'held') return;
+  const anchor = keptAnchor(state, config);
+  const clean =
+    anchor !== null && strayCount(state.recentMag, anchor, state.baselineUt, config) === 0;
+
+  if (ready && anchor === null) {
+    const oldest = state.recentMag[0];
+    state.phase = held({
+      sinceMs: oldest?.t ?? t,
+      compassDeg: magneticHeading,
+      gyroDeg: state.heading,
+    });
+    return;
+  }
+
+  if (
+    ready &&
+    anchor !== null &&
+    clean &&
+    t - anchor.sinceMs >= LONG_REACQUIRE_MS &&
+    motionAgrees(
+      wrap180(magneticHeading - anchor.compassDeg),
+      wrap180(state.heading - anchor.gyroDeg),
+    )
+  ) {
+    acquire(state, t, magneticHeading, magnitudeUt);
+    return;
+  }
+
+  state.phase = held(anchor);
+}
+
+function keepOrClearAnchor(state: FusionState, config: HeadingFusionConfig): void {
+  if (state.phase.kind !== 'held') return;
+  state.phase = held(keptAnchor(state, config));
+}
 
 function appliedYawDegPerSec(yaw: HeldYaw, biasDegPerSec: number): number {
   if (yaw.kind === 'brake') return 0;
@@ -510,8 +580,8 @@ function appliedYawDegPerSec(yaw: HeldYaw, biasDegPerSec: number): number {
 }
 
 function latch(state: FusionState): void {
-  if (state.phase.kind === 'live' || state.phase.kind === 'held') {
-    state.phase = { kind: 'held', disagreeSinceMs: null, anchorDeg: null };
+  if (state.phase.kind === 'live') {
+    state.phase = held(null);
     state.rawYawAccumDeg = 0;
     return;
   }
@@ -745,11 +815,10 @@ function cloneState(state: FusionState): FusionState {
     lastT: state.lastT,
     phase:
       state.phase.kind === 'held'
-        ? {
-            kind: 'held',
-            disagreeSinceMs: state.phase.disagreeSinceMs,
-            anchorDeg: state.phase.anchorDeg,
-          }
+        ? held(
+            state.phase.anchor === null ? null : { ...state.phase.anchor },
+            state.phase.unlevelStreak,
+          )
         : { kind: state.phase.kind },
     baselineUt: state.baselineUt,
     lastMagHeading: state.lastMagHeading,
@@ -759,6 +828,7 @@ function cloneState(state: FusionState): FusionState {
       t: obs.t,
       magnitudeUt: obs.magnitudeUt,
       headingDeg: obs.headingDeg,
+      yawHeadingDeg: obs.yawHeadingDeg,
     })),
   };
 }
