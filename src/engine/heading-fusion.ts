@@ -179,6 +179,7 @@ type HeadingAnchor = {
   sinceMs: number;
   compassDeg: number;
   gyroDeg: number;
+  magnitudeUt: number;
 };
 
 type Phase =
@@ -388,12 +389,10 @@ function applyMagnetometer(
     state.rawYawAccumDeg = 0;
   }
 
-  if (state.phase.kind === 'held' && disagrees) {
-    trackDisagreement(state, t, magneticHeading, magnitudeUt, ready, config);
+  if (state.phase.kind === 'held') {
+    trackDisagreement(state, t, magneticHeading, magnitudeUt, config);
     return { magneticHeading, magnitudeUt };
   }
-
-  if (state.phase.kind === 'held') keepOrClearAnchor(state, config);
 
   if (magnitudeBad || sudden || disagrees) {
     return { magneticHeading, magnitudeUt };
@@ -416,6 +415,30 @@ function recoveryReady(
   baselineUt: number | null,
   config: HeadingFusionConfig,
 ): boolean {
+  return windowSettled(
+    recentMag,
+    config,
+    (magnitudeUt) => !magnitudeIsBad(magnitudeUt, baselineUt, config),
+  );
+}
+
+function earthBandSettled(recentMag: readonly MagObs[], config: HeadingFusionConfig): boolean {
+  const last = recentMag[recentMag.length - 1];
+  if (!last) return false;
+  return windowSettled(
+    recentMag,
+    config,
+    (magnitudeUt) =>
+      !outsideEarthBand(magnitudeUt, config) &&
+      !magnitudeDeviates(magnitudeUt, last.magnitudeUt, config),
+  );
+}
+
+function windowSettled(
+  recentMag: readonly MagObs[],
+  config: HeadingFusionConfig,
+  magnitudeOk: (magnitudeUt: number) => boolean,
+): boolean {
   const first = recentMag[0];
   const last = recentMag[recentMag.length - 1];
   if (!first || !last || last.headingDeg === null) return false;
@@ -424,7 +447,7 @@ function recoveryReady(
   for (const obs of recentMag) {
     if (obs.headingDeg === null) return false;
     if (Math.abs(wrap180(obs.headingDeg - last.headingDeg)) > config.jumpThresholdDeg) return false;
-    if (magnitudeIsBad(obs.magnitudeUt, baselineUt, config)) return false;
+    if (!magnitudeOk(obs.magnitudeUt)) return false;
   }
   return true;
 }
@@ -508,16 +531,16 @@ function holdAgrees(recentMag: readonly MagObs[]): boolean {
 function strayCount(
   recentMag: readonly MagObs[],
   anchor: HeadingAnchor,
-  baselineUt: number | null,
   config: HeadingFusionConfig,
 ): number {
   let count = 0;
   for (const obs of recentMag) {
-    if (obs.headingDeg === null || magnitudeIsBad(obs.magnitudeUt, baselineUt, config)) {
-      count += 1;
-      continue;
-    }
-    if (Math.abs(wrap180(obs.headingDeg - anchor.compassDeg)) > FAR_STABLE_DEG) count += 1;
+    const drifted =
+      obs.headingDeg === null ||
+      outsideEarthBand(obs.magnitudeUt, config) ||
+      magnitudeDeviates(obs.magnitudeUt, anchor.magnitudeUt, config) ||
+      Math.abs(wrap180(obs.headingDeg - anchor.compassDeg)) > FAR_STABLE_DEG;
+    if (drifted) count += 1;
   }
   return count;
 }
@@ -525,7 +548,7 @@ function strayCount(
 function keptAnchor(state: FusionState, config: HeadingFusionConfig): HeadingAnchor | null {
   if (state.phase.kind !== 'held' || state.phase.anchor === null) return null;
   const anchor = state.phase.anchor;
-  if (strayCount(state.recentMag, anchor, state.baselineUt, config) >= 2) return null;
+  if (strayCount(state.recentMag, anchor, config) >= 2) return null;
   return anchor;
 }
 
@@ -534,26 +557,24 @@ function trackDisagreement(
   t: number,
   magneticHeading: number,
   magnitudeUt: number,
-  ready: boolean,
   config: HeadingFusionConfig,
 ): void {
   if (state.phase.kind !== 'held') return;
   const anchor = keptAnchor(state, config);
-  const clean =
-    anchor !== null && strayCount(state.recentMag, anchor, state.baselineUt, config) === 0;
+  const clean = anchor !== null && strayCount(state.recentMag, anchor, config) === 0;
 
-  if (ready && anchor === null) {
+  if (earthBandSettled(state.recentMag, config) && anchor === null) {
     const oldest = state.recentMag[0];
     state.phase = held({
       sinceMs: oldest?.t ?? t,
       compassDeg: magneticHeading,
       gyroDeg: state.heading,
+      magnitudeUt,
     });
     return;
   }
 
   if (
-    ready &&
     anchor !== null &&
     clean &&
     t - anchor.sinceMs >= LONG_REACQUIRE_MS &&
@@ -617,16 +638,28 @@ function learnBias(
   state.rawYawAccumDeg = 0;
 }
 
+function outsideEarthBand(magnitudeUt: number, config: HeadingFusionConfig): boolean {
+  return magnitudeUt < config.magnitudeMinUt || magnitudeUt > config.magnitudeMaxUt;
+}
+
+function magnitudeDeviates(
+  magnitudeUt: number,
+  referenceUt: number,
+  config: HeadingFusionConfig,
+): boolean {
+  const reference = Math.abs(referenceUt);
+  if (reference === 0) return true;
+  return Math.abs(magnitudeUt - referenceUt) / reference > config.magnitudeDeviation;
+}
+
 function magnitudeIsBad(
   magnitudeUt: number,
   baselineUt: number | null,
   config: HeadingFusionConfig,
 ): boolean {
-  if (magnitudeUt < config.magnitudeMinUt || magnitudeUt > config.magnitudeMaxUt) return true;
+  if (outsideEarthBand(magnitudeUt, config)) return true;
   if (baselineUt === null) return false;
-  const reference = Math.abs(baselineUt);
-  if (reference === 0) return true;
-  return Math.abs(magnitudeUt - baselineUt) / reference > config.magnitudeDeviation;
+  return magnitudeDeviates(magnitudeUt, baselineUt, config);
 }
 
 /** 1 − exp(−dt / τ). Zero when there is no elapsed time. */
