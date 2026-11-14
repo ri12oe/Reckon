@@ -1,5 +1,9 @@
 import { getDatabase } from '@/db/database';
-import { estimateStepLength, type StepLengthEstimate } from '@/engine/step-length';
+import {
+  acceptedStepLengthM,
+  estimateStepLength,
+  type StepLengthEstimate,
+} from '@/engine/step-length';
 
 const CREATE_TABLE = `CREATE TABLE IF NOT EXISTS calibration (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -61,10 +65,10 @@ function parseRow(row: CalibrationRow | null): StepLengthEstimate | null {
   if (!row || row.calibrated !== 1) return null;
   if (row.distance_m === null || row.step_count === null || row.step_length_m === null) return null;
   const checked = estimateStepLength({ distanceM: row.distance_m, stepCount: row.step_count });
-  if (!checked) return null;
-  if (!Number.isFinite(row.step_length_m) || row.step_length_m <= 0) return null;
+  const stepLengthM = acceptedStepLengthM(row.step_length_m);
+  if (!checked || stepLengthM === null) return null;
   return {
-    stepLengthM: row.step_length_m,
+    stepLengthM,
     distanceM: checked.distanceM,
     stepCount: checked.stepCount,
   };
@@ -94,9 +98,11 @@ export function saveStepLength(estimate: StepLengthEstimate | null): StepLengthE
     distanceM: estimate.distanceM,
     stepCount: estimate.stepCount,
   });
-  if (!checked || !Number.isFinite(estimate.stepLengthM) || estimate.stepLengthM <= 0) return null;
+  if (!checked) return null;
+  const stepLengthM = acceptedStepLengthM(checked.stepLengthM);
+  if (stepLengthM === null || acceptedStepLengthM(estimate.stepLengthM) === null) return null;
   const stored: StepLengthEstimate = {
-    stepLengthM: estimate.stepLengthM,
+    stepLengthM,
     distanceM: checked.distanceM,
     stepCount: checked.stepCount,
   };

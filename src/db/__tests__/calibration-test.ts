@@ -74,12 +74,12 @@ describe('calibration store', () => {
     expect(saveStepLength(eightOverFive)).toEqual(eightOverFive);
     expect(isCalibrated()).toBe(true);
     expect(readStepLength()).toEqual(eightOverFive);
-    expect(saveStepLength({ stepLengthM: 0.7, distanceM: 7, stepCount: 10 })).toEqual({
-      stepLengthM: 0.7,
-      distanceM: 7,
+    expect(saveStepLength({ stepLengthM: 0.7, distanceM: 15, stepCount: 10 })).toEqual({
+      stepLengthM: 1.2,
+      distanceM: 15,
       stepCount: 10,
     });
-    expect(readStepLength()?.stepLengthM).toBe(0.7);
+    expect(readStepLength()).toEqual({ stepLengthM: 1.2, distanceM: 15, stepCount: 10 });
   });
 
   test('a null or unusable estimate does not mark the walker calibrated', () => {
@@ -89,8 +89,50 @@ describe('calibration store', () => {
     expect(saveStepLength({ stepLengthM: 1, distanceM: 0, stepCount: 4 })).toBeNull();
     expect(saveStepLength({ stepLengthM: 1, distanceM: 5, stepCount: 0 })).toBeNull();
     expect(saveStepLength({ stepLengthM: Number.NaN, distanceM: 5, stepCount: 8 })).toBeNull();
+    expect(saveStepLength({ stepLengthM: 5, distanceM: 5, stepCount: 1 })).toBeNull();
+    expect(saveStepLength({ stepLengthM: 0.2, distanceM: 2, stepCount: 1 })).toBeNull();
     expect(isCalibrated()).toBe(false);
     expect(readStepLength()).toBeNull();
+  });
+
+  test('a stored stride outside 0.3 to 1.2 m is not a saved length', () => {
+    for (const stepLengthM of [5, 0.2]) {
+      state.db = memoryDb({
+        calibrated: 1,
+        step_length_m: stepLengthM,
+        distance_m: 5,
+        step_count: 1,
+      });
+      const { isCalibrated, readStepLength } = loadStore();
+      expect(isCalibrated()).toBe(false);
+      expect(readStepLength()).toBeNull();
+    }
+  });
+
+  test('a stored stride of 0.3 m or 1.2 m is kept', () => {
+    state.db = memoryDb({
+      calibrated: 1,
+      step_length_m: 0.3,
+      distance_m: 0.3,
+      step_count: 1,
+    });
+    expect(loadStore().readStepLength()).toEqual({
+      stepLengthM: 0.3,
+      distanceM: 0.3,
+      stepCount: 1,
+    });
+
+    state.db = memoryDb({
+      calibrated: 1,
+      step_length_m: 1.2,
+      distance_m: 12,
+      step_count: 10,
+    });
+    expect(loadStore().readStepLength()).toEqual({
+      stepLengthM: 1.2,
+      distanceM: 12,
+      stepCount: 10,
+    });
   });
 
   test('a calibrated flag with no step length is not calibrated', () => {

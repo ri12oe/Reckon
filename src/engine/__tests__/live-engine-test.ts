@@ -440,6 +440,23 @@ describe('precomputed steps and headings', () => {
     expect(engine.getSnapshot().rawPath[1]).toEqual({ x: 0, y: 0.5, t: 1000 });
   });
 
+  test('setStepLength(5) leaves the 0.75 m stride and the next east step ends at 0.75 m', () => {
+    const engine = createLiveEngine();
+    engine.setStepLength(5);
+    engine.setStepLength(0.2);
+    expect(engine.getStepLength()).toBe(0.75);
+    engine.pushStep({ t: 100, heading: 90 });
+    const kept = engine.getSnapshot().rawPath[1]!;
+    expect(kept.x).toBe(0.75);
+    expect(kept.y).toBeCloseTo(0, 12);
+    expect(kept.t).toBe(100);
+
+    engine.setStepLength(1.2);
+    engine.pushStep({ t: 200, heading: 90 });
+    expect(engine.getStepLength()).toBe(1.2);
+    expect(engine.getSnapshot().rawPath[2]!.x).toBeCloseTo(1.95, 12);
+  });
+
   test('4 steps at 1 m end at (4, 0); setStepLength(0.5) leaves them; the next steps add 0.5 m', () => {
     const engine = createLiveEngine({ stepLengthM: 1 });
     for (const t of [100, 200, 300, 400]) engine.pushStep({ t, heading: 90 });
@@ -469,12 +486,12 @@ describe('precomputed steps and headings', () => {
     expect(after.rawPath[6]!.y).toBeCloseTo(0.5, 12);
     expect(after.rawPath[6]!.t).toBe(600);
 
-    engine.setStepLength(2);
+    engine.setStepLength(1.2);
     expect(engine.getSnapshot().rawPath).toEqual(after.rawPath);
     engine.pushStep({ t: 700, heading: 90 });
     const third = engine.getSnapshot();
     expect(third.rawPath.slice(0, 7)).toEqual(after.rawPath);
-    expect(third.rawPath[7]!.x).toBe(6.5);
+    expect(third.rawPath[7]!.x).toBeCloseTo(5.7, 12);
     expect(third.rawPath[7]!.y).toBeCloseTo(0.5, 12);
     expect(third.rawPath[7]!.t).toBe(700);
   });
