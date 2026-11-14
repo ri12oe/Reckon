@@ -133,6 +133,34 @@ export function snapCorridor(
   return corrected;
 }
 
+export const MIN_LOOP_PATH_M = 8;
+
+export const LOOP_CLOSURE_RADIUS_M = 3;
+
+export function loopClosureCounts(
+  path: readonly PathPoint[],
+  target?: { x: number; y: number },
+): boolean {
+  if (path.length < 2) return false;
+
+  const start = path[0]!;
+  const end = path[path.length - 1]!;
+  const goalX = target?.x ?? start.x;
+  const goalY = target?.y ?? start.y;
+  if (
+    !Number.isFinite(goalX) ||
+    !Number.isFinite(goalY) ||
+    !Number.isFinite(end.x) ||
+    !Number.isFinite(end.y)
+  ) {
+    return false;
+  }
+
+  const total = cumulativeArc(path).at(-1) ?? 0;
+  if (total < MIN_LOOP_PATH_M) return false;
+  return Math.hypot(end.x - goalX, end.y - goalY) <= LOOP_CLOSURE_RADIUS_M;
+}
+
 /**
  * Spread the gap between the last point and `target` along the path.
  * `target` defaults to the first point: the walker is back at the start.

@@ -122,6 +122,8 @@ export {
   countCalibrationSteps,
   estimateStepLength,
   estimateStepLengthFromSteps,
+  MAX_STEP_LENGTH_M,
+  MIN_STEP_LENGTH_M,
   stepLengthOrDefault,
 } from '@/engine/step-length';
 export type { CalibrationWalk, StepLengthEstimate } from '@/engine/step-length';
@@ -132,6 +134,9 @@ export {
   alignLandmarks,
   closeLoop,
   correctDrift,
+  LOOP_CLOSURE_RADIUS_M,
+  loopClosureCounts,
+  MIN_LOOP_PATH_M,
   nearestCorridorAxis,
   snapCorridor,
 } from '@/engine/drift-correction';

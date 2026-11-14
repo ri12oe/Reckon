@@ -36,11 +36,13 @@ export function leaveCalibration(session: CalibrationSession): CalibrationSessio
   return cancelCalibration(session);
 }
 
+export const MAX_COURSE_M = 200;
+
 export function parseCourseMeters(text: string): number | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
   const distanceM = Number(trimmed);
-  if (!Number.isFinite(distanceM) || distanceM <= 0) return null;
+  if (!Number.isFinite(distanceM) || distanceM <= 0 || distanceM > MAX_COURSE_M) return null;
   return distanceM;
 }
 

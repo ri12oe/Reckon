@@ -56,6 +56,16 @@ describe('parseCourseMeters', () => {
     expect(parseCourseMeters('0')).toBeNull();
     expect(parseCourseMeters('-3')).toBeNull();
     expect(parseCourseMeters('hallway')).toBeNull();
+    expect(parseCourseMeters('NaN')).toBeNull();
+    expect(parseCourseMeters('Infinity')).toBeNull();
+  });
+
+  test('a course longer than 200 m is not a course', () => {
+    expect(parseCourseMeters('200')).toBe(200);
+    expect(parseCourseMeters(' 200 ')).toBe(200);
+    expect(parseCourseMeters('200.1')).toBeNull();
+    expect(parseCourseMeters('1e6')).toBeNull();
+    expect(parseCourseMeters('1e309')).toBeNull();
   });
 });
 
@@ -91,7 +101,7 @@ describe('calibration session', () => {
     expect(noteSteps(done, 21)).toBe(done);
   });
 
-  test('15 m over 20 detected steps is 0.75 m/step, not 1.5', () => {
+  test('15 m over 20 detected steps is 0.75 m/step; 10 steps on that course caps at 1.2', () => {
     const done = endCalibration(noteSteps(beginCalibration(idle), 20));
     expect(done).toEqual({ phase: 'done', steps: 20 });
     expect(estimateStepLength({ distanceM: 15, stepCount: done.steps })).toEqual({
@@ -100,7 +110,7 @@ describe('calibration session', () => {
       stepCount: 20,
     });
     expect(estimateStepLength({ distanceM: 15, stepCount: CALIBRATION_STEPS })).toEqual({
-      stepLengthM: 1.5,
+      stepLengthM: 1.2,
       distanceM: 15,
       stepCount: 10,
     });
