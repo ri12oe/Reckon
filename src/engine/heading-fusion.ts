@@ -10,9 +10,12 @@
  *    The magnetometer is absolute and noisy.
  * 3. When the field is interfered, stop the blend and trust the gyro.
  *    A clean, stable window of `recoverHoldMs` resumes the blend when
- *    the compass is within `reacquireMaxDeg` of the gyro heading.
- *    A longer disagreement snaps only when the compass change matches
- *    integrated yaw. One bad sample does not restart that stretch.
+ *    the compass is within `reacquireMaxDeg` of the gyro heading and
+ *    the compass change since the last trusted fix matches integrated yaw.
+ *    A gap that did not integrate yaw leaves nothing to match, so that
+ *    same short window copies the compass. A longer disagreement snaps
+ *    on the yaw match. Samples that turn with the gyro do not restart
+ *    the stretch. One bad sample does not either.
  *
  * The first fix uses that same window and the same yaw match.
  *
@@ -95,7 +98,9 @@ export type HeadingFusionConfig = {
   jumpThresholdDeg: number;
   /**
    * A magnetometer heading farther than this from the gyro heading is not
-   * trusted on the short recovery window. That window stays gyro-only.
+   * trusted on the short recovery window. That window also stays gyro-only
+   * when the compass change since the last trusted fix does not match
+   * integrated yaw.
    */
   reacquireMaxDeg: number;
   /** Milliseconds of clean, stable magnetometer samples required before a fix. */
@@ -375,8 +380,19 @@ function applyMagnetometer(
   const sudden = isJump(state, magneticHeading, config) && innovationAbs > config.jumpThresholdDeg;
   const disagrees = innovationAbs > config.reacquireMaxDeg;
   const ready = recoveryReady(state.recentMag, state.baselineUt, config);
+  if (ready && state.voidBias) {
+    acquire(state, t, magneticHeading, magnitudeUt);
+    return { magneticHeading, magnitudeUt };
+  }
 
-  if (ready && !disagrees) {
+  const yawExplains =
+    state.lastMagHeading !== null &&
+    motionAgrees(
+      wrap180(magneticHeading - state.lastMagHeading),
+      wrap180(state.heading - state.headingMark),
+    );
+
+  if (ready && !disagrees && yawExplains) {
     const wasLive = state.phase.kind === 'live';
     state.phase = { kind: 'live' };
     if (wasLive) learnBias(state, t, magneticHeading, config);
@@ -535,11 +551,17 @@ function strayCount(
 ): number {
   let count = 0;
   for (const obs of recentMag) {
+    let headingStrays = obs.headingDeg === null;
+    if (obs.headingDeg !== null) {
+      const compassDelta = wrap180(obs.headingDeg - anchor.compassDeg);
+      const gyroDelta = wrap180(obs.yawHeadingDeg - anchor.gyroDeg);
+      headingStrays =
+        Math.abs(compassDelta) > FAR_STABLE_DEG && !motionAgrees(compassDelta, gyroDelta);
+    }
     const drifted =
-      obs.headingDeg === null ||
+      headingStrays ||
       outsideEarthBand(obs.magnitudeUt, config) ||
-      magnitudeDeviates(obs.magnitudeUt, anchor.magnitudeUt, config) ||
-      Math.abs(wrap180(obs.headingDeg - anchor.compassDeg)) > FAR_STABLE_DEG;
+      magnitudeDeviates(obs.magnitudeUt, anchor.magnitudeUt, config);
     if (drifted) count += 1;
   }
   return count;

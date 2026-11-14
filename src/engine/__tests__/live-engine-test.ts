@@ -248,7 +248,7 @@ describe('sensor walk', () => {
     expect(recalled.snapshotForSave().rawPath[8]).toEqual(northEnd);
   });
 
-  test('a clean field 20° off the hold reacquires and the walk leaves north', () => {
+  test('a clean field 20° off a still gyro keeps the walk on north through 4 s', () => {
     const engine = createLiveEngine({ stepLengthM: 1, drift: { corridor: false } });
     const times = sampleTimes(0, 4000);
     for (const t of times) {
@@ -261,15 +261,13 @@ describe('sensor walk', () => {
     engine.pushStep({ t: 3000 });
 
     const snapshot = engine.getSnapshot();
-    expect(snapshot.gyroOnly).toBe(false);
-    expect(snapshot.heading).toBeCloseTo(17.3291, 4);
+    expect(snapshot.gyroOnly).toBe(true);
+    expect(snapshot.heading).toBe(0);
     expect(snapshot.stepCount).toBe(2);
     expect(snapshot.rawPath[1]).toEqual({ x: 0, y: 1, t: 500 });
-    expect(snapshot.rawPath[2]!.x).toBeCloseTo(0.2554, 4);
-    expect(snapshot.rawPath[2]!.y).toBeCloseTo(1.9668, 4);
-    expect(snapshot.rawPath[2]!.t).toBe(3000);
-    expect(engine.snapshotForSave().gyroOnly).toBe(false);
-    expect(engine.snapshotForSave().heading).toBeCloseTo(17.3291, 4);
+    expect(snapshot.rawPath[2]).toEqual({ x: 0, y: 2, t: 3000 });
+    expect(engine.snapshotForSave().gyroOnly).toBe(true);
+    expect(engine.snapshotForSave().heading).toBe(0);
   });
 
   test('four steps north, 90°/s for one second, four steps east: (0, 4) then (4, 4), heading 90°', () => {
